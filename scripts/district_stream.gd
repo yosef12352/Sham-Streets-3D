@@ -1,6 +1,6 @@
 extends Node3D
 
-const BLOCK_DISTANCE := 22.0
+const CITY := preload("res://scripts/city_layout.gd")
 const LOAD_RADIUS := 57.0
 const UNLOAD_RADIUS := 70.0
 const UPDATE_DISTANCE := 4.0
@@ -30,12 +30,12 @@ func update_focus(focus: Vector3) -> void:
     if focus.distance_squared_to(last_focus) < UPDATE_DISTANCE * UPDATE_DISTANCE:
         return
     last_focus = focus
-    for x in range(-4, 5):
-        for z in range(-4, 5):
-            if x == 0 or z == 0:
+    for x in range(-7, 8):
+        for z in range(-7, 8):
+            if not CITY.has_building(x, z):
                 continue
             var key := Vector2i(x, z)
-            var location := Vector3(x * BLOCK_DISTANCE, 0, z * BLOCK_DISTANCE)
+            var location := Vector3(x * CITY.BLOCK_SIZE, 0, z * CITY.BLOCK_SIZE)
             var distance := focus.distance_squared_to(location)
             if blocks.has(key):
                 if distance > UNLOAD_RADIUS * UNLOAD_RADIUS:

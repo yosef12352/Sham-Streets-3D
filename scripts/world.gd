@@ -2,6 +2,7 @@ extends Node3D
 
 const UI_FONT := preload("res://assets/fonts/DejaVuSans-UI.ttf")
 const STREET_SURFACE := preload("res://assets/materials/street_surface.gdshader")
+const CITY := preload("res://scripts/city_layout.gd")
 const SPEED := 6.0
 const JUMP_SPEED := 6.0
 const GRAVITY := 18.0
@@ -10,9 +11,16 @@ var camera: Camera3D
 var stick := Vector2.ZERO
 var touch_start := Vector2.ZERO
 var touch_id := -1
-var look_id := -1
 var yaw := 0.0
 var pitch := 0.38
+var zoom_scale := 1.0
+var current_zoom := 1.0
+var camera_fingers: Dictionary = {}
+var camera_span := 0.0
+var foot_buttons: Array[TouchScreenButton] = []
+var car_buttons: Array[TouchScreenButton] = []
+var action_button: TouchScreenButton
+var movement_focus := Vector3(INF, 0, INF)
 var car: ShamVehicleController
 var districts := preload("res://scripts/district_stream.gd").new()
 var pedestrians: Node3D
@@ -79,22 +87,26 @@ func _box(pos: Vector3, size: Vector3, color: Color, solid: bool = true, materia
     add_child(body)
 
 func _build_city() -> void:
-    _box(Vector3(0,-0.5,0), Vector3(240,1,240), Color(0.64,0.58,0.46))
+    _box(Vector3(0,-0.5,0), Vector3(CITY.HALF_SIZE * 2, 1, CITY.HALF_SIZE * 2), Color(0.64,0.58,0.46))
     add_child(districts)
     _build_pedestrians()
     var asphalt := _street_surface(Color("#555557"), 0)
     var paving := _street_surface(Color("#bdab90"), 1)
     var shop_stone := _street_surface(Color("#ae9171"), 2)
-    _box(Vector3(0, 0.02, 0), Vector3(15, 0.04, 230), Color.WHITE, false, asphalt)
-    _box(Vector3(0, 0.03, 0), Vector3(230, 0.04, 15), Color.WHITE, false, asphalt)
-    for i in range(-10, 11):
-        if i == 0:
+    for center: float in CITY.ROAD_CENTERS:
+        _box(Vector3(center, 0.02, 0), Vector3(15, 0.04, 350), Color.WHITE, false, asphalt)
+        _box(Vector3(0, 0.03, center), Vector3(350, 0.04, 15), Color.WHITE, false, asphalt)
+    _build_park(paving)
+    for i in range(-16, 17):
+        if i in [-11, 0, 11]:
             continue
         _box(Vector3(0, 0.065, i * 10), Vector3(0.13, 0.015, 3), Color("#decf92"), false)
         _box(Vector3(i * 10, 0.065, 0), Vector3(3, 0.015, 0.13), Color("#decf92"), false)
     for side in [-1, 1]:
-        for half in [-1, 1]:
-            _box(Vector3(side * 8.5, 0.05, half * 58), Vector3(2, 0.1, 102), Color.WHITE, true, paving)
+        for center_z in [-147.0, -55.0, 55.0, 147.0]:
+            var length := 56.0 if absf(center_z) > 100 else 94.0
+            for road_x: float in CITY.ROAD_CENTERS:
+                _box(Vector3(road_x + side * 8.5, 0.05, center_z), Vector3(2, 0.1, length), Color.WHITE, true, paving)
         for zebra in range(6):
             _box(Vector3(-4.8 + zebra * 1.9, 0.066, side * 7.8), Vector3(0.72, 0.012, 2.9), Color("#d7d2bd"), false)
     for stall in range(-3, 5):
@@ -129,6 +141,28 @@ func _build_city() -> void:
     e.ambient_light_energy = 0.67
     env.environment = e
     add_child(env)
+
+func _build_park(paving: Material) -> void:
+    var center: Vector3 = CITY.PARK + Vector3(-11, 0, -11)
+    _box(center + Vector3(0, 0.025, 0), Vector3(37, 0.05, 37), Color("#626c49"), false)
+    _box(center + Vector3(0, 0.043, 0), Vector3(37, 0.04, 3.2), Color.WHITE, false, paving)
+    _box(center + Vector3(0, 0.045, 0), Vector3(3.2, 0.04, 37), Color.WHITE, false, paving)
+    for x in [-13, -6, 6, 13]:
+        for z in [-13, -6, 6, 13]:
+            var location := center + Vector3(x, 0, z)
+            _box(location + Vector3.UP * 0.83, Vector3(0.22, 1.65, 0.22), Color("#69543c"), true)
+            var leaves := MeshInstance3D.new()
+            var canopy := SphereMesh.new()
+            canopy.radius = 1.42
+            canopy.height = 2.7
+            canopy.radial_segments = 8
+            canopy.rings = 5
+            var material := StandardMaterial3D.new()
+            material.albedo_color = Color("#485738").lightened(float(abs(x + z) % 8) * 0.025)
+            canopy.material = material
+            leaves.mesh = canopy
+            leaves.position = location + Vector3.UP * 2.5
+            add_child(leaves)
 
 func _street_surface(color: Color, kind: int) -> ShaderMaterial:
     var material := ShaderMaterial.new()
@@ -170,9 +204,11 @@ func _build_pedestrians() -> void:
     pedestrians.name = "MarketPedestrians"
     add_child(pedestrians)
     var colors := [Color(0.63, 0.31, 0.23), Color(0.26, 0.39, 0.52), Color(0.50, 0.42, 0.25)]
-    for index in range(12):
+    for index in range(24):
         var side := -1 if index % 2 == 1 else 1
         var from := Vector3(side * 8.45, 0.93, 8 + (index / 2) * 12)
+        if index >= 12:
+            from = Vector3(-110 + side * 8.45, 0.93, -91 + ((index - 12) / 2) * 13)
         var to := from + Vector3(0, 0, 8)
         var pedestrian := preload("res://scripts/market_pedestrian.gd").new()
         pedestrian.configure(from, to, colors[index % colors.size()], float(index % 4) * 0.28)
@@ -221,18 +257,21 @@ func _build_ui() -> void:
     hud.add_theme_constant_override("outline_size", 8)
     overlay.add_child(hud)
     minimap.position = Vector2(24, 24)
-    minimap.size = Vector2(128, 128)
+    minimap.size = Vector2(168, 168)
     minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
     overlay.add_child(minimap)
-    _touch_action(overlay, "ركوب / تفاعل", Vector2(1130, 620), _request_interaction)
-    _touch_action(overlay, "ضرب", Vector2(1130, 535), func() -> void: action_requested = "strike")
-    _touch_action(overlay, "إطلاق", Vector2(992, 535), func() -> void: action_requested = "pulse")
-    _touch_action(overlay, "تلقيم", Vector2(854, 535), func() -> void: action_requested = "reload")
-    _touch_action(overlay, "بوق", Vector2(716, 620), func() -> void: action_requested = "horn")
-    _touch_action(overlay, "قفز", Vector2(992, 620), _jump)
-    var brake := _touch_action(overlay, "فرامل", Vector2(854, 620), func() -> void: braking = true)
+    action_button = _touch_action(overlay, "تفاعل / ركوب", Vector2(1110, 620), _request_interaction, Vector2(146, 68), true)
+    foot_buttons.append(_touch_action(overlay, "ضرب", Vector2(1110, 542), func() -> void: action_requested = "strike", Vector2(146, 68)))
+    foot_buttons.append(_touch_action(overlay, "إطلاق", Vector2(976, 542), func() -> void: action_requested = "pulse"))
+    foot_buttons.append(_touch_action(overlay, "تلقيم", Vector2(842, 542), func() -> void: action_requested = "reload"))
+    foot_buttons.append(_touch_action(overlay, "قفز", Vector2(976, 620), _jump))
+    car_buttons.append(_touch_action(overlay, "بوق", Vector2(842, 620), func() -> void: action_requested = "horn"))
+    var brake := _touch_action(overlay, "فرامل", Vector2(976, 620), func() -> void: braking = true)
     brake.released.connect(func() -> void: braking = false)
-    _button(overlay, "حفظ", Vector2(-150, -270)).pressed.connect(_save_with_feedback)
+    car_buttons.append(brake)
+    _button(overlay, "حفظ", Vector2(-148, -324)).pressed.connect(_save_with_feedback)
+    _touch_action(overlay, "+ تقريب", Vector2(1112, 468), func() -> void: _adjust_zoom(-0.15), Vector2(144, 56))
+    _touch_action(overlay, "- إبعاد", Vector2(958, 468), func() -> void: _adjust_zoom(0.15), Vector2(144, 56))
     _movement_button(overlay, "▲", Vector2(105, 510), Vector2.UP)
     _movement_button(overlay, "▼", Vector2(105, 620), Vector2.DOWN)
     _movement_button(overlay, "◀", Vector2(22, 565), Vector2.LEFT)
@@ -242,17 +281,13 @@ func _movement_button(parent: Control, title: String, location: Vector2, directi
     var button := _touch_action(parent, title, location, func() -> void: pad_touches[direction] = true, Vector2(72, 60))
     button.released.connect(func() -> void: pad_touches.erase(direction))
 
-func _touch_action(parent: Control, title: String, location: Vector2, callback: Callable, extent := Vector2(124, 68)) -> TouchScreenButton:
+func _touch_action(parent: Control, title: String, location: Vector2, callback: Callable, extent := Vector2(124, 68), primary := false) -> TouchScreenButton:
     var button := TouchScreenButton.new()
     button.position = location
-    var normal := GradientTexture2D.new()
-    normal.width = int(extent.x)
-    normal.height = int(extent.y)
-    var gradient := Gradient.new()
-    gradient.colors = PackedColorArray([Color("#202b32e6"), Color("#141d23e6")])
-    normal.gradient = gradient
-    button.texture_normal = normal
+    button.texture_normal = _button_texture(extent, Color("#233336ed") if not primary else Color("#355551f5"))
+    button.texture_pressed = _button_texture(extent, Color("#53695ced"))
     var label := Label.new()
+    label.name = "Caption"
     label.text = title
     label.size = extent
     label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -264,6 +299,19 @@ func _touch_action(parent: Control, title: String, location: Vector2, callback: 
     button.pressed.connect(callback)
     parent.add_child(button)
     return button
+
+func _button_texture(extent: Vector2, fill: Color) -> ImageTexture:
+    var image := Image.create(int(extent.x), int(extent.y), false, Image.FORMAT_RGBA8)
+    var radius := 13.0
+    for y in range(image.get_height()):
+        for x in range(image.get_width()):
+            var position := Vector2(x + 0.5, y + 0.5)
+            var corner := position.clamp(Vector2.ONE * radius, extent - Vector2.ONE * radius)
+            var distance := (position - corner).length()
+            if distance < radius:
+                var shade := fill.lightened(0.33) if distance > radius - 1.7 else fill
+                image.set_pixel(x, y, shade)
+    return ImageTexture.create_from_image(image)
 
 func _button(parent: Control, label: String, offset: Vector2) -> Button:
     var button := Button.new()
@@ -293,6 +341,11 @@ func _build_marker() -> void:
     add_child(marker)
 
 func _refresh_ui(message := "") -> void:
+    for button in foot_buttons:
+        button.visible = not driving
+    for button in car_buttons:
+        button.visible = driving
+    (action_button.get_node("Caption") as Label).text = "نزول" if driving else "تفاعل / ركوب"
     var objective := "تسلّم الطلب عند العلامة"
     marker.position = PICKUP + Vector3.UP * 0.13
     if missions.active_mission == JOB:
@@ -382,7 +435,7 @@ func _position_from_save(value: Variant, fallback: Vector3) -> Vector3:
             if not (component is float or component is int) or not is_finite(float(component)):
                 return fallback
         var position := Vector3(value[0], value[1], value[2])
-        if absf(position.x) < 114 and absf(position.z) < 114 and position.y >= 0 and position.y < 40:
+        if absf(position.x) < CITY.HALF_SIZE - 1 and absf(position.z) < CITY.HALF_SIZE - 1 and position.y >= 0 and position.y < 40:
             return position
     return fallback
 
@@ -413,7 +466,8 @@ func _jump() -> void:
 func _notification(what: int) -> void:
     if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
         touch_id = -1
-        look_id = -1
+        camera_fingers.clear()
+        camera_span = 0.0
         stick = Vector2.ZERO
         braking = false
         pad_touches.clear()
@@ -423,6 +477,10 @@ func _notification(what: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventKey and event.pressed and not event.echo:
         match event.physical_keycode:
+            KEY_EQUAL, KEY_KP_ADD:
+                _adjust_zoom(-0.15)
+            KEY_MINUS, KEY_KP_SUBTRACT:
+                _adjust_zoom(0.15)
             KEY_F:
                 action_requested = "strike"
             KEY_G:
@@ -443,20 +501,43 @@ func _unhandled_input(event: InputEvent) -> void:
                 if touch_id == -1:
                     touch_id = event.index
                     touch_start = event.position
-            elif look_id == -1:
-                look_id = event.index
+            elif camera_fingers.size() < 2:
+                camera_fingers[event.index] = event.position
+                camera_span = _finger_span()
         elif event.index == touch_id:
             touch_id = -1
             stick = Vector2.ZERO
-        elif event.index == look_id:
-            look_id = -1
+        elif camera_fingers.has(event.index):
+            camera_fingers.erase(event.index)
+            camera_span = 0.0
     elif event is InputEventScreenDrag:
         if event.index == touch_id:
             stick = (event.position - touch_start).limit_length(95) / 95.0
-        elif event.index == look_id:
-            _orbit(event.relative)
+        elif camera_fingers.has(event.index):
+            camera_fingers[event.index] = event.position
+            if camera_fingers.size() == 2:
+                var span := _finger_span()
+                if camera_span > 12.0 and span > 12.0:
+                    zoom_scale = clampf(zoom_scale * camera_span / span, 0.48, 1.9)
+                camera_span = span
+            else:
+                _orbit(event.relative)
+    elif event is InputEventMouseButton and event.pressed:
+        if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+            _adjust_zoom(-0.15)
+        elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+            _adjust_zoom(0.15)
     elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
         _orbit(event.relative)
+
+func _finger_span() -> float:
+    if camera_fingers.size() != 2:
+        return 0.0
+    var locations := camera_fingers.values()
+    return locations[0].distance_to(locations[1])
+
+func _adjust_zoom(amount: float) -> void:
+    zoom_scale = clampf(zoom_scale + amount, 0.48, 1.9)
 
 func _orbit(relative: Vector2) -> void:
     yaw = wrapf(yaw - relative.x * 0.008, -PI, PI)
@@ -489,8 +570,11 @@ func _physics_process(delta: float) -> void:
         var direction := Vector3(input_dir.x, 0, input_dir.y).rotated(Vector3.UP, yaw)
         var running := Input.is_physical_key_pressed(KEY_SHIFT) or stick.length() > 0.9
         var speed := SPEED * (1.55 if running else 1.0)
-        player.velocity.x = direction.x * speed
-        player.velocity.z = direction.z * speed
+        var horizontal_velocity := Vector2(player.velocity.x, player.velocity.z)
+        var desired_velocity := Vector2(direction.x, direction.z) * speed
+        horizontal_velocity = horizontal_velocity.move_toward(desired_velocity, (23.0 if input_dir.length() > 0.08 else 34.0) * delta)
+        player.velocity.x = horizontal_velocity.x
+        player.velocity.z = horizontal_velocity.y
         if not player.is_on_floor():
             player.velocity.y -= GRAVITY * delta
         player.move_and_slide()
@@ -504,18 +588,25 @@ func _physics_process(delta: float) -> void:
             sounds.play_effect("step", -22)
             step_delay = clampf(1.65 / pace, 0.19, 0.53)
         if direction.length() > 0.1:
-            player.rotation.y = atan2(-direction.x, -direction.z)
+            player.rotation.y = lerp_angle(player.rotation.y, atan2(-direction.x, -direction.z), 1.0 - exp(-delta * 19.0))
         if player.position.y < -8:
             player.position = SPAWN
             player.velocity = Vector3.ZERO
     var actor_position := car.position if driving else player.position
     districts.update_focus(actor_position)
-    minimap.update_positions(actor_position, marker.position)
+    if actor_position.distance_squared_to(movement_focus) > 25.0:
+        movement_focus = actor_position
+        for pedestrian in pedestrians.get_children():
+            var near: bool = actor_position.distance_squared_to(pedestrian.position) < 65.0 * 65.0
+            pedestrian.visible = near
+            pedestrian.set_physics_process(near)
+    minimap.update_positions(actor_position, marker.position, (car if driving else player).rotation.y)
     road_response.tick(delta, car, actor_position, state)
     var focus := actor_position + Vector3.UP * 0.95
     var heading := yaw + (car.rotation.y if driving else 0.0)
     var offset := Vector3(0, sin(pitch), cos(pitch)).rotated(Vector3.UP, heading)
-    var target := focus + offset * (10.0 if driving else 7.0)
+    current_zoom = lerpf(current_zoom, zoom_scale, 1.0 - exp(-delta * 11.0))
+    var target := focus + offset * (10.0 if driving else 7.0) * current_zoom
     var query := PhysicsRayQueryParameters3D.create(focus, target, 1, [player.get_rid(), car.get_rid()])
     var hit := get_world_3d().direct_space_state.intersect_ray(query)
     if not hit.is_empty():

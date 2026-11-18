@@ -92,7 +92,7 @@ func _run() -> void:
     third.road_response.remaining = 0.0
     await frames(3)
     check(third.state.wanted_level == 0 and not third.road_response.patrol.visible, "Patrol should end at zero")
-    check(third.pedestrians.get_child_count() == 12, "Market should have twelve residents")
+    check(third.pedestrians.get_child_count() == 24, "City should have twenty-four residents")
     check(third.car.get_node("Trim").get_child_count() >= 8, "Car trim should be attached")
     third.action_requested = "pulse"
     await frames(2)
@@ -104,10 +104,23 @@ func _run() -> void:
     third.action_requested = "reload"
     await frames(2)
     check(third.rounds == 8 and third.reserve == 23, "Reload should transfer reserve ammo")
+    third._adjust_zoom(-10.0)
+    check(is_equal_approx(third.zoom_scale, 0.48), "Camera zoom should clamp at the near limit")
+    third._adjust_zoom(10.0)
+    check(is_equal_approx(third.zoom_scale, 1.9), "Camera zoom should clamp at the far limit")
+    await frames(12)
+    check(third.current_zoom > 1.5, "Camera should move smoothly toward the zoom target")
+    third.player.position = Vector3(-110, 1.0, -65)
+    await frames(5)
+    check(third.districts.blocks.has(Vector2i(-6, -3)), "Outer district should load when approached")
+    check(third.pedestrians.get_child(14).visible, "Outer district should wake nearby residents")
+    check(not third.pedestrians.get_child(0).visible, "Distant market residents should be hidden")
+    check(third._save(), "Expanded district should be saveable")
+    check(third._position_from_save(ShamSaveSystem.load_game().get("position"), Vector3.ZERO).x < -100.0, "Expanded coordinates should restore")
     var corrupted := FileAccess.open(ShamSaveSystem.SAVE_PATH, FileAccess.WRITE)
     corrupted.store_string("{truncated")
     corrupted.close()
-    check(ShamSaveSystem.load_game().get("money") == 150, "Corrupt current save should recover previous valid save")
+    check(ShamSaveSystem.load_game().get("money") == 100, "Corrupt current save should recover previous valid save")
     if failures == 0:
         print("PASS: streaming, pedestrians, traffic, patrol, movement, car, delivery, shop, reload and backup recovery")
     third.queue_free()
