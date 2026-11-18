@@ -92,10 +92,24 @@ func _run() -> void:
     third.road_response.remaining = 0.0
     await frames(3)
     check(third.state.wanted_level == 0 and not third.road_response.patrol.visible, "Patrol should end at zero")
+    check(third.pedestrians.get_child_count() == 12, "Market should have twelve residents")
+    check(third.car.get_node("Trim").get_child_count() >= 8, "Car trim should be attached")
+    third.action_requested = "pulse"
+    await frames(2)
+    check(third.rounds == 7, "A shot should consume a round")
+    third.action_requested = "pulse"
+    await frames(2)
+    check(third.rounds == 7, "Shot cooldown should prevent duplicate shots")
+    await frames(27)
+    third.action_requested = "reload"
+    await frames(2)
+    check(third.rounds == 8 and third.reserve == 23, "Reload should transfer reserve ammo")
     var corrupted := FileAccess.open(ShamSaveSystem.SAVE_PATH, FileAccess.WRITE)
     corrupted.store_string("{truncated")
     corrupted.close()
     check(ShamSaveSystem.load_game().get("money") == 150, "Corrupt current save should recover previous valid save")
     if failures == 0:
         print("PASS: streaming, pedestrians, traffic, patrol, movement, car, delivery, shop, reload and backup recovery")
+    third.queue_free()
+    await process_frame
     quit(failures)

@@ -25,6 +25,7 @@ func _spawn(location: Vector3, color: Color) -> ShamVehicleController:
     vehicle.maximum_speed = 9.0
     var material := StandardMaterial3D.new()
     material.albedo_color = color
+    material.cull_mode = BaseMaterial3D.CULL_DISABLED
     vehicle.get_node("Body").material_override = material
     add_child(vehicle)
     vehicle.enter_vehicle()

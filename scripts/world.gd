@@ -22,6 +22,15 @@ var minimap := preload("res://scripts/market_map.gd").new()
 var marker: MeshInstance3D
 var driving := false
 var braking := false
+var person := preload("res://scripts/person_model.gd").new()
+var sounds := preload("res://scripts/street_audio.gd").new()
+var action_cooldown := 0.0
+var step_delay := 0.0
+var rounds := 8
+var reserve := 24
+var action_requested := ""
+var last_action := ""
+var pad_touches: Dictionary = {}
 var interact_requested := false
 
 const SPAWN := Vector3(1, 1, 8)
@@ -36,6 +45,7 @@ func _ready() -> void:
     _build_city()
     _build_player()
     _build_car()
+    add_child(sounds)
     add_child(road_response)
     add_child(state)
     add_child(missions)
@@ -100,12 +110,12 @@ func _build_pedestrians() -> void:
     pedestrians.name = "MarketPedestrians"
     add_child(pedestrians)
     var colors := [Color(0.63, 0.31, 0.23), Color(0.26, 0.39, 0.52), Color(0.50, 0.42, 0.25)]
-    for index in range(3):
-        var side := -1 if index == 1 else 1
-        var from := Vector3(side * 8.45, 0.93, 8 + index * 12)
+    for index in range(12):
+        var side := -1 if index % 2 == 1 else 1
+        var from := Vector3(side * 8.45, 0.93, 8 + (index / 2) * 12)
         var to := from + Vector3(0, 0, 8)
         var pedestrian := preload("res://scripts/market_pedestrian.gd").new()
-        pedestrian.configure(from, to, colors[index], float(index) * 0.4)
+        pedestrian.configure(from, to, colors[index % colors.size()], float(index % 4) * 0.28)
         pedestrians.add_child(pedestrian)
 
 func _build_player() -> void:
@@ -118,15 +128,9 @@ func _build_player() -> void:
     capsule.height = 1.8
     collision.shape = capsule
     player.add_child(collision)
-    var mesh := MeshInstance3D.new()
-    var model := CapsuleMesh.new()
-    model.radius = 0.4
-    model.height = 1.8
-    mesh.mesh = model
-    var mat := StandardMaterial3D.new()
-    mat.albedo_color = Color(0.15,0.3,0.6)
-    mesh.material_override = mat
-    player.add_child(mesh)
+    person.build(Color("#29465a"), Color("#c99472"), Color("#363c45"))
+    person.equip_launcher()
+    player.add_child(person)
     add_child(player)
     camera = Camera3D.new()
     camera.current = true
@@ -158,12 +162,45 @@ func _build_ui() -> void:
     minimap.size = Vector2(128, 128)
     minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
     overlay.add_child(minimap)
-    _button(overlay, "تفاعل", Vector2(-150, -100)).pressed.connect(_request_interaction)
-    _button(overlay, "قفز", Vector2(-288, -100)).pressed.connect(_jump)
-    var brake := _button(overlay, "فرامل", Vector2(-426, -100))
-    brake.button_down.connect(func() -> void: braking = true)
-    brake.button_up.connect(func() -> void: braking = false)
-    _button(overlay, "حفظ", Vector2(-150, -187)).pressed.connect(_save_with_feedback)
+    _touch_action(overlay, "ركوب / تفاعل", Vector2(1130, 620), _request_interaction)
+    _touch_action(overlay, "ضرب", Vector2(1130, 535), func() -> void: action_requested = "strike")
+    _touch_action(overlay, "إطلاق", Vector2(992, 535), func() -> void: action_requested = "pulse")
+    _touch_action(overlay, "تلقيم", Vector2(854, 535), func() -> void: action_requested = "reload")
+    _touch_action(overlay, "بوق", Vector2(716, 620), func() -> void: action_requested = "horn")
+    _touch_action(overlay, "قفز", Vector2(992, 620), _jump)
+    var brake := _touch_action(overlay, "فرامل", Vector2(854, 620), func() -> void: braking = true)
+    brake.released.connect(func() -> void: braking = false)
+    _button(overlay, "حفظ", Vector2(-150, -270)).pressed.connect(_save_with_feedback)
+    _movement_button(overlay, "▲", Vector2(105, 510), Vector2.UP)
+    _movement_button(overlay, "▼", Vector2(105, 620), Vector2.DOWN)
+    _movement_button(overlay, "◀", Vector2(22, 565), Vector2.LEFT)
+    _movement_button(overlay, "▶", Vector2(188, 565), Vector2.RIGHT)
+
+func _movement_button(parent: Control, title: String, location: Vector2, direction: Vector2) -> void:
+    var button := _touch_action(parent, title, location, func() -> void: pad_touches[direction] = true, Vector2(72, 60))
+    button.released.connect(func() -> void: pad_touches.erase(direction))
+
+func _touch_action(parent: Control, title: String, location: Vector2, callback: Callable, extent := Vector2(124, 68)) -> TouchScreenButton:
+    var button := TouchScreenButton.new()
+    button.position = location
+    var normal := GradientTexture2D.new()
+    normal.width = int(extent.x)
+    normal.height = int(extent.y)
+    var gradient := Gradient.new()
+    gradient.colors = PackedColorArray([Color("#202b32e6"), Color("#141d23e6")])
+    normal.gradient = gradient
+    button.texture_normal = normal
+    var label := Label.new()
+    label.text = title
+    label.size = extent
+    label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    label.add_theme_font_size_override("font_size", 22)
+    label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    button.add_child(label)
+    button.pressed.connect(callback)
+    parent.add_child(button)
+    return button
 
 func _button(parent: Control, label: String, offset: Vector2) -> Button:
     var button := Button.new()
@@ -202,6 +239,8 @@ func _refresh_ui(message := "") -> void:
         marker.position = SHOP + Vector3.UP * 0.13
     if driving:
         objective += " · قيادة"
+    else:
+        objective += " · ذخيرة %d / %d" % [rounds, reserve]
     hud.text = "سوق حلب  |  الرصيد %d  |  المطلوبية %d/5\n%s" % [state.money, state.wanted_level, objective]
     if not message.is_empty():
         hud.text += "\n" + message
@@ -256,9 +295,7 @@ func _interact() -> void:
     _refresh_ui()
 
 func _apply_outfit() -> void:
-    var mesh := player.get_child(1) as MeshInstance3D
-    var material := mesh.material_override as StandardMaterial3D
-    material.albedo_color = Color(0.20, 0.43, 0.34) if state.outfit_id == "market" else Color(0.15, 0.3, 0.6)
+    person.top.albedo_color = Color(0.20, 0.43, 0.34) if state.outfit_id == "market" else Color(0.15, 0.3, 0.6)
 
 func _save_with_feedback() -> void:
     _refresh_ui("تم الحفظ" if _save() else "تعذّر الحفظ")
@@ -270,6 +307,8 @@ func _save() -> bool:
     data["car_position"] = [car.position.x, car.position.y, car.position.z]
     data["car_yaw"] = car.rotation.y
     data["driving"] = driving
+    data["rounds"] = rounds
+    data["reserve"] = reserve
     data["delivery_active"] = missions.active_mission == JOB
     return ShamSaveSystem.save_game(data)
 
@@ -286,6 +325,8 @@ func _position_from_save(value: Variant, fallback: Vector3) -> Vector3:
 func _restore() -> void:
     var data := ShamSaveSystem.load_game()
     state.restore(data)
+    rounds = clampi(int(data.get("rounds", 8)), 0, 8)
+    reserve = clampi(int(data.get("reserve", 24)), 0, 24)
     _apply_outfit()
     player.position = _position_from_save(data.get("position"), SPAWN)
     car.position = _position_from_save(data.get("car_position"), CAR_SPAWN)
@@ -311,12 +352,21 @@ func _notification(what: int) -> void:
         look_id = -1
         stick = Vector2.ZERO
         braking = false
+        pad_touches.clear()
     if what == NOTIFICATION_APPLICATION_PAUSED and is_node_ready():
         _save()
 
 func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventKey and event.pressed and not event.echo:
         match event.physical_keycode:
+            KEY_F:
+                action_requested = "strike"
+            KEY_G:
+                action_requested = "pulse"
+            KEY_R:
+                action_requested = "reload"
+            KEY_H:
+                action_requested = "horn"
             KEY_E:
                 _request_interaction()
             KEY_SPACE:
@@ -353,6 +403,16 @@ func _physics_process(delta: float) -> void:
         interact_requested = false
         _interact()
     var input_dir := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
+    var letters := Vector2(
+        float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
+        float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W))
+    )
+    input_dir = (input_dir + letters).limit_length()
+    for direction: Vector2 in pad_touches:
+        input_dir += direction
+    input_dir = input_dir.limit_length()
+    _update_actions(delta)
+    sounds.set_engine(car.forward_speed, driving)
     if stick.length() > 0.1:
         input_dir = stick
     if driving:
@@ -370,6 +430,15 @@ func _physics_process(delta: float) -> void:
         if not player.is_on_floor():
             player.velocity.y -= GRAVITY * delta
         player.move_and_slide()
+        var pace := Vector2(player.get_real_velocity().x, player.get_real_velocity().z).length()
+        var aiming := last_action == "pulse" and action_cooldown > 0.0
+        person.launcher.visible = aiming
+        var strike := action_cooldown / 0.34 if last_action == "strike" else 0.0
+        person.animate(delta, pace, player.is_on_floor(), strike, aiming)
+        step_delay -= delta
+        if pace > 0.9 and player.is_on_floor() and step_delay <= 0.0:
+            sounds.play_effect("step", -22)
+            step_delay = clampf(1.65 / pace, 0.19, 0.53)
         if direction.length() > 0.1:
             player.rotation.y = atan2(-direction.x, -direction.z)
         if player.position.y < -8:
@@ -389,3 +458,69 @@ func _physics_process(delta: float) -> void:
         target = hit.position - offset * 0.18
     camera.position = target if not hit.is_empty() else camera.position.lerp(target, 1.0 - exp(-delta * 12.0))
     camera.look_at(focus)
+
+func _update_actions(delta: float) -> void:
+    action_cooldown = maxf(0.0, action_cooldown - delta)
+    var action := action_requested
+    action_requested = ""
+    if action.is_empty() or action_cooldown > 0.0:
+        return
+    if driving:
+        if action == "horn":
+            sounds.play_effect("horn")
+            action_cooldown = 0.5
+        return
+    last_action = action
+    match action:
+        "reload":
+            var moved := mini(8 - rounds, reserve)
+            if moved > 0:
+                rounds += moved
+                reserve -= moved
+                sounds.play_effect("reload")
+                action_cooldown = 0.6
+        "pulse":
+            if rounds == 0:
+                _refresh_ui("المخزن فارغ · لقّم أولاً")
+                return
+            rounds -= 1
+            action_cooldown = 0.40
+            sounds.play_effect("pulse")
+            _react_to_action(11.0)
+        "strike":
+            action_cooldown = 0.34
+            sounds.play_effect("strike")
+            _react_to_action(1.7)
+    _refresh_ui()
+
+func _react_to_action(reach: float) -> void:
+    var origin := player.global_position
+    var forward := -player.global_basis.z
+    var end := origin + forward * reach
+    var query := PhysicsRayQueryParameters3D.create(origin, end, 3, [player.get_rid()])
+    var hit := get_world_3d().direct_space_state.intersect_ray(query)
+    if reach > 2.0:
+        _pulse_flash(origin + Vector3.UP * 0.35, hit.get("position", end) + Vector3.UP * 0.35)
+    if not hit.is_empty() and hit.collider.has_method("react"):
+        hit.collider.react()
+        state.set_wanted(state.wanted_level + 1)
+
+func _pulse_flash(from: Vector3, to: Vector3) -> void:
+    var beam := MeshInstance3D.new()
+    var segment := CylinderMesh.new()
+    segment.top_radius = 0.022
+    segment.bottom_radius = 0.022
+    segment.height = from.distance_to(to)
+    segment.radial_segments = 5
+    var material := StandardMaterial3D.new()
+    material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+    material.albedo_color = Color("#ffc77a")
+    segment.material = material
+    beam.mesh = segment
+    beam.position = from.lerp(to, 0.5)
+    var axis := (to - from).normalized()
+    beam.basis = Basis(Quaternion(Vector3.UP, axis))
+    add_child(beam)
+    var tween := beam.create_tween()
+    tween.tween_interval(0.07)
+    tween.tween_callback(beam.queue_free)

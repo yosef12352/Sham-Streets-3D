@@ -9,10 +9,16 @@ var blocks: Dictionary = {}
 var last_focus := Vector3(INF, 0, INF)
 var limestone := StandardMaterial3D.new()
 var trim := StandardMaterial3D.new()
+var window_mesh := BoxMesh.new()
 
 func _ready() -> void:
     limestone.albedo_color = Color(0.74, 0.66, 0.51)
     trim.albedo_color = Color(0.48, 0.37, 0.28)
+    var glass := StandardMaterial3D.new()
+    glass.albedo_color = Color("#535d5b")
+    glass.roughness = 0.43
+    window_mesh.material = glass
+    window_mesh.size = Vector3(1.25, 1.5, 0.15)
 
 func update_focus(focus: Vector3) -> void:
     focus.y = 0
@@ -45,6 +51,7 @@ func _create_building(key: Vector2i, location: Vector3) -> StaticBody3D:
     building.add_child(collision)
     _add_mesh(building, Vector3(13, height, 13), height * 0.5, limestone)
     _add_mesh(building, Vector3(14, 0.5, 14), height + 0.25, trim)
+    _add_windows(building, floori(height / 3.0))
     add_child(building)
     return building
 
@@ -56,3 +63,20 @@ func _add_mesh(parent: Node3D, size: Vector3, elevation: float, material: Materi
     instance.mesh = mesh
     instance.position.y = elevation
     parent.add_child(instance)
+
+func _add_windows(parent: Node3D, floors: int) -> void:
+    var windows := MultiMesh.new()
+    windows.transform_format = MultiMesh.TRANSFORM_3D
+    windows.mesh = window_mesh
+    windows.instance_count = floors * 12
+    var index := 0
+    for wall in range(4):
+        var rotation := Basis(Vector3.UP, wall * PI * 0.5)
+        for floor_index in range(floors):
+            for column in [-3.5, 0.0, 3.5]:
+                var location := rotation * Vector3(column, 1.8 + floor_index * 2.65, 6.54)
+                windows.set_instance_transform(index, Transform3D(rotation, location))
+                index += 1
+    var renderer := MultiMeshInstance3D.new()
+    renderer.multimesh = windows
+    parent.add_child(renderer)
