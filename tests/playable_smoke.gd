@@ -81,10 +81,21 @@ func _run() -> void:
     root.add_child(third)
     await frames(2)
     check(third.state.money == 100 and third.state.outfit_id == "market", "Reload should preserve money and clothes")
+    var traffic_z: float = third.road_response.traffic.position.z
+    third.state.set_wanted(2)
+    await frames(35)
+    check(third.road_response.traffic.position.z > traffic_z + 0.5, "Traffic should move along the road")
+    check(third.road_response.patrol.visible, "Wanted level should activate a patrol")
+    third.road_response.remaining = 0.0
+    await frames(2)
+    check(third.state.wanted_level == 1, "Wanted level should decay")
+    third.road_response.remaining = 0.0
+    await frames(3)
+    check(third.state.wanted_level == 0 and not third.road_response.patrol.visible, "Patrol should end at zero")
     var corrupted := FileAccess.open(ShamSaveSystem.SAVE_PATH, FileAccess.WRITE)
     corrupted.store_string("{truncated")
     corrupted.close()
     check(ShamSaveSystem.load_game().get("money") == 150, "Corrupt current save should recover previous valid save")
     if failures == 0:
-        print("PASS: streaming, pedestrians, movement, car, delivery, shop, reload and backup recovery")
+        print("PASS: streaming, pedestrians, traffic, patrol, movement, car, delivery, shop, reload and backup recovery")
     quit(failures)

@@ -14,6 +14,7 @@ var pitch := 0.38
 var car: ShamVehicleController
 var districts := preload("res://scripts/district_stream.gd").new()
 var pedestrians: Node3D
+var road_response := preload("res://scripts/road_response.gd").new()
 var state := ShamGameState.new()
 var missions := ShamMissionManager.new()
 var hud: Label
@@ -35,11 +36,13 @@ func _ready() -> void:
     _build_city()
     _build_player()
     _build_car()
+    add_child(road_response)
     add_child(state)
     add_child(missions)
     _build_ui()
     _build_marker()
     _restore()
+    state.wanted_changed.connect(func(_level: int) -> void: _refresh_ui())
     districts.update_focus(car.position if driving else player.position)
     _refresh_ui()
     camera.position = player.position + Vector3(0, 4, 8)
@@ -375,6 +378,7 @@ func _physics_process(delta: float) -> void:
     var actor_position := car.position if driving else player.position
     districts.update_focus(actor_position)
     minimap.update_positions(actor_position, marker.position)
+    road_response.tick(delta, car, actor_position, state)
     var focus := actor_position + Vector3.UP * 0.95
     var heading := yaw + (car.rotation.y if driving else 0.0)
     var offset := Vector3(0, sin(pitch), cos(pitch)).rotated(Vector3.UP, heading)
