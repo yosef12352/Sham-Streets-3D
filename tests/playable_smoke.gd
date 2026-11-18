@@ -28,6 +28,9 @@ func _run() -> void:
     var first := WORLD.instantiate()
     root.add_child(first)
     await frames(15)
+    check(first.districts.blocks.size() > 0 and first.districts.blocks.size() < 64, "Only nearby buildings should spawn")
+    var pedestrian := first.pedestrians.get_child(0) as CharacterBody3D
+    check(pedestrian.position.z > 8.1, "Market pedestrians should walk their routes")
     check(first.player.is_on_floor(), "Player should settle on the road")
     first._jump()
     await frames(12)
@@ -58,10 +61,13 @@ func _run() -> void:
     root.add_child(second)
     await frames(2)
     check(second.missions.active_mission == second.JOB, "Scene reload should recover the delivery")
+    var old_block := Vector2i(1, 2)
+    check(second.districts.blocks.has(old_block), "Block near the market should be loaded")
     second.player.position = second.DELIVERY + Vector3.UP
     second._request_interaction()
     await frames(2)
     check(second.state.money == 150, "Delivery should award 150")
+    check(not second.districts.blocks.has(old_block), "Distant market blocks should unload")
     second._request_interaction()
     await frames(2)
     check(second.state.money == 150, "Delivery must award money only once")
@@ -80,5 +86,5 @@ func _run() -> void:
     corrupted.close()
     check(ShamSaveSystem.load_game().get("money") == 150, "Corrupt current save should recover previous valid save")
     if failures == 0:
-        print("PASS: movement, car, delivery, shop, reload and backup recovery")
+        print("PASS: streaming, pedestrians, movement, car, delivery, shop, reload and backup recovery")
     quit(failures)

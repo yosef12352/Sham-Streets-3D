@@ -12,9 +12,12 @@ var look_id := -1
 var yaw := 0.0
 var pitch := 0.38
 var car: ShamVehicleController
+var districts := preload("res://scripts/district_stream.gd").new()
+var pedestrians: Node3D
 var state := ShamGameState.new()
 var missions := ShamMissionManager.new()
 var hud: Label
+var minimap := preload("res://scripts/market_map.gd").new()
 var marker: MeshInstance3D
 var driving := false
 var braking := false
@@ -37,6 +40,7 @@ func _ready() -> void:
     _build_ui()
     _build_marker()
     _restore()
+    districts.update_focus(car.position if driving else player.position)
     _refresh_ui()
     camera.position = player.position + Vector3(0, 4, 8)
 
@@ -61,15 +65,8 @@ func _box(pos: Vector3, size: Vector3, color: Color, solid: bool = true) -> void
 
 func _build_city() -> void:
     _box(Vector3(0,-0.5,0), Vector3(240,1,240), Color(0.64,0.58,0.46))
-    for x in range(-4,5):
-        for z in range(-4,5):
-            if x == 0 or z == 0:
-                continue
-            var px := x * 22.0
-            var pz := z * 22.0
-            var height := float(7 + (abs(x * 7 + z * 11) % 5) * 3)
-            _box(Vector3(px,height/2,pz),Vector3(13,height,13),Color(0.74,0.66,0.51))
-            _box(Vector3(px,height+0.25,pz),Vector3(14,0.5,14),Color(0.48,0.37,0.28))
+    add_child(districts)
+    _build_pedestrians()
     _box(Vector3(0,0.02,0),Vector3(15,0.04,230),Color(0.19,0.2,0.21),false)
     _box(Vector3(0,0.03,0),Vector3(230,0.04,15),Color(0.19,0.2,0.21),false)
     for i in range(-5, 6):
@@ -95,9 +92,23 @@ func _build_city() -> void:
     env.environment = e
     add_child(env)
 
+func _build_pedestrians() -> void:
+    pedestrians = Node3D.new()
+    pedestrians.name = "MarketPedestrians"
+    add_child(pedestrians)
+    var colors := [Color(0.63, 0.31, 0.23), Color(0.26, 0.39, 0.52), Color(0.50, 0.42, 0.25)]
+    for index in range(3):
+        var side := -1 if index == 1 else 1
+        var from := Vector3(side * 8.45, 0.93, 8 + index * 12)
+        var to := from + Vector3(0, 0, 8)
+        var pedestrian := preload("res://scripts/market_pedestrian.gd").new()
+        pedestrian.configure(from, to, colors[index], float(index) * 0.4)
+        pedestrians.add_child(pedestrian)
+
 func _build_player() -> void:
     player = CharacterBody3D.new()
     player.position = SPAWN
+    player.collision_mask = 3
     var collision := CollisionShape3D.new()
     var capsule := CapsuleShape3D.new()
     capsule.radius = 0.4
@@ -140,6 +151,10 @@ func _build_ui() -> void:
     hud.add_theme_font_size_override("font_size", 28)
     hud.add_theme_constant_override("outline_size", 8)
     overlay.add_child(hud)
+    minimap.position = Vector2(24, 24)
+    minimap.size = Vector2(128, 128)
+    minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    overlay.add_child(minimap)
     _button(overlay, "تفاعل", Vector2(-150, -100)).pressed.connect(_request_interaction)
     _button(overlay, "قفز", Vector2(-288, -100)).pressed.connect(_jump)
     var brake := _button(overlay, "فرامل", Vector2(-426, -100))
@@ -199,6 +214,7 @@ func _interact() -> void:
         var exit_position := car.global_position + car.global_basis.x * 2.2 + Vector3.UP * 0.4
         var probe := PhysicsShapeQueryParameters3D.new()
         probe.shape = player.get_child(0).shape
+        probe.collision_mask = 3
         probe.transform = Transform3D(Basis.IDENTITY, exit_position)
         if not get_world_3d().direct_space_state.intersect_shape(probe, 1).is_empty():
             _refresh_ui("اترك مساحة بجانب السيارة")
@@ -209,7 +225,7 @@ func _interact() -> void:
         player.velocity = Vector3.ZERO
         player.show()
         player.collision_layer = 1
-        player.collision_mask = 1
+        player.collision_mask = 3
     elif player.position.distance_to(PICKUP) < 3.0 and not state.completed_missions.has(JOB):
         if missions.start_mission(JOB, 1, 150):
             _save()
@@ -356,7 +372,10 @@ func _physics_process(delta: float) -> void:
         if player.position.y < -8:
             player.position = SPAWN
             player.velocity = Vector3.ZERO
-    var focus := (car.position if driving else player.position) + Vector3.UP * 0.95
+    var actor_position := car.position if driving else player.position
+    districts.update_focus(actor_position)
+    minimap.update_positions(actor_position, marker.position)
+    var focus := actor_position + Vector3.UP * 0.95
     var heading := yaw + (car.rotation.y if driving else 0.0)
     var offset := Vector3(0, sin(pitch), cos(pitch)).rotated(Vector3.UP, heading)
     var target := focus + offset * (10.0 if driving else 7.0)
