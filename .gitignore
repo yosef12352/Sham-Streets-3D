@@ -1,0 +1,14 @@
+# Godot 4
+.godot/
+.import/
+.export/
+export.cfg
+*.tmp
+*.log
+# Local credentials
+.env
+.env.*
+!.env.example
+secrets/
+*.keystore
+*.jks
