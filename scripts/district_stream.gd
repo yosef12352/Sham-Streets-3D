@@ -7,18 +7,23 @@ const UPDATE_DISTANCE := 4.0
 
 var blocks: Dictionary = {}
 var last_focus := Vector3(INF, 0, INF)
-var limestone := StandardMaterial3D.new()
+var limestone := ShaderMaterial.new()
 var trim := StandardMaterial3D.new()
 var window_mesh := BoxMesh.new()
+var frame_mesh := BoxMesh.new()
 
 func _ready() -> void:
-    limestone.albedo_color = Color(0.74, 0.66, 0.51)
+    limestone.shader = preload("res://assets/materials/street_surface.gdshader")
+    limestone.set_shader_parameter("base", Color("#bca489"))
+    limestone.set_shader_parameter("surface_kind", 2)
     trim.albedo_color = Color(0.48, 0.37, 0.28)
     var glass := StandardMaterial3D.new()
     glass.albedo_color = Color("#535d5b")
     glass.roughness = 0.43
     window_mesh.material = glass
-    window_mesh.size = Vector3(1.25, 1.5, 0.15)
+    window_mesh.size = Vector3(1.18, 1.42, 0.15)
+    frame_mesh.size = Vector3(1.43, 1.65, 0.14)
+    frame_mesh.material = trim
 
 func update_focus(focus: Vector3) -> void:
     focus.y = 0
@@ -69,14 +74,22 @@ func _add_windows(parent: Node3D, floors: int) -> void:
     windows.transform_format = MultiMesh.TRANSFORM_3D
     windows.mesh = window_mesh
     windows.instance_count = floors * 12
+    var frames := MultiMesh.new()
+    frames.transform_format = MultiMesh.TRANSFORM_3D
+    frames.mesh = frame_mesh
+    frames.instance_count = windows.instance_count
     var index := 0
     for wall in range(4):
         var rotation := Basis(Vector3.UP, wall * PI * 0.5)
         for floor_index in range(floors):
             for column in [-3.5, 0.0, 3.5]:
                 var location := rotation * Vector3(column, 1.8 + floor_index * 2.65, 6.54)
-                windows.set_instance_transform(index, Transform3D(rotation, location))
+                frames.set_instance_transform(index, Transform3D(rotation, location))
+                windows.set_instance_transform(index, Transform3D(rotation, location + rotation.z * 0.08))
                 index += 1
     var renderer := MultiMeshInstance3D.new()
     renderer.multimesh = windows
     parent.add_child(renderer)
+    var frames_renderer := MultiMeshInstance3D.new()
+    frames_renderer.multimesh = frames
+    parent.add_child(frames_renderer)

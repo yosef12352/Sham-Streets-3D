@@ -1,6 +1,7 @@
 extends Node3D
 
 const UI_FONT := preload("res://assets/fonts/DejaVuSans-UI.ttf")
+const STREET_SURFACE := preload("res://assets/materials/street_surface.gdshader")
 const SPEED := 6.0
 const JUMP_SPEED := 6.0
 const GRAVITY := 18.0
@@ -58,7 +59,7 @@ func _ready() -> void:
     _refresh_ui()
     camera.position = player.position + Vector3(0, 4, 8)
 
-func _box(pos: Vector3, size: Vector3, color: Color, solid: bool = true) -> void:
+func _box(pos: Vector3, size: Vector3, color: Color, solid: bool = true, material: Material = null) -> void:
     var body := StaticBody3D.new()
     body.position = pos
     var mesh := MeshInstance3D.new()
@@ -67,7 +68,7 @@ func _box(pos: Vector3, size: Vector3, color: Color, solid: bool = true) -> void
     mesh.mesh = cube
     var mat := StandardMaterial3D.new()
     mat.albedo_color = color
-    mesh.material_override = mat
+    mesh.material_override = material if material != null else mat
     body.add_child(mesh)
     if solid:
         var collider := CollisionShape3D.new()
@@ -81,30 +82,88 @@ func _build_city() -> void:
     _box(Vector3(0,-0.5,0), Vector3(240,1,240), Color(0.64,0.58,0.46))
     add_child(districts)
     _build_pedestrians()
-    _box(Vector3(0,0.02,0),Vector3(15,0.04,230),Color(0.19,0.2,0.21),false)
-    _box(Vector3(0,0.03,0),Vector3(230,0.04,15),Color(0.19,0.2,0.21),false)
-    for i in range(-5, 6):
-        _box(Vector3(0, 0.065, i * 19), Vector3(0.18, 0.015, 4), Color(0.94, 0.75, 0.37), false)
-        _box(Vector3(i * 19, 0.065, 0), Vector3(4, 0.015, 0.18), Color(0.94, 0.75, 0.37), false)
+    var asphalt := _street_surface(Color("#555557"), 0)
+    var paving := _street_surface(Color("#bdab90"), 1)
+    var shop_stone := _street_surface(Color("#ae9171"), 2)
+    _box(Vector3(0, 0.02, 0), Vector3(15, 0.04, 230), Color.WHITE, false, asphalt)
+    _box(Vector3(0, 0.03, 0), Vector3(230, 0.04, 15), Color.WHITE, false, asphalt)
+    for i in range(-10, 11):
+        if i == 0:
+            continue
+        _box(Vector3(0, 0.065, i * 10), Vector3(0.13, 0.015, 3), Color("#decf92"), false)
+        _box(Vector3(i * 10, 0.065, 0), Vector3(3, 0.015, 0.13), Color("#decf92"), false)
     for side in [-1, 1]:
-        _box(Vector3(side * 8.5, 0.05, 0), Vector3(2, 0.1, 220), Color(0.81, 0.72, 0.58))
-    for x in range(-3, 4):
-        var awning_color := Color(0.17, 0.40, 0.33) if x % 2 == 0 else Color(0.63, 0.24, 0.18)
-        _box(Vector3(10, 2.7, x * 4.5), Vector3(2.7, 0.22, 3.2), awning_color, false)
-        _box(Vector3(11, 1.2, x * 4.5), Vector3(1.1, 2.4, 3), Color(0.63, 0.51, 0.37))
+        for half in [-1, 1]:
+            _box(Vector3(side * 8.5, 0.05, half * 58), Vector3(2, 0.1, 102), Color.WHITE, true, paving)
+        for zebra in range(6):
+            _box(Vector3(-4.8 + zebra * 1.9, 0.066, side * 7.8), Vector3(0.72, 0.012, 2.9), Color("#d7d2bd"), false)
+    for stall in range(-3, 5):
+        if stall in [-2, -1, 0, 1]:
+            continue
+        _build_shop(stall * 4.5, stall, shop_stone)
+    for z in [-51, -25, 14, 31, 55]:
+        _street_lamp(Vector3(-9.2, 0.10, z))
+    _street_lamp(Vector3(9.2, 0.10, -36))
     var sun := DirectionalLight3D.new()
-    sun.rotation_degrees = Vector3(-50,-35,0)
-    sun.light_energy = 1.5
+    sun.rotation_degrees = Vector3(-38, -31, 0)
+    sun.light_color = Color("#fff1d8")
+    sun.light_energy = 1.18
+    sun.shadow_enabled = true
+    sun.directional_shadow_max_distance = 50.0
     add_child(sun)
     var env := WorldEnvironment.new()
     var e := Environment.new()
-    e.background_mode = Environment.BG_COLOR
-    e.background_color = Color(0.55,0.74,0.89)
+    var sky_material := ProceduralSkyMaterial.new()
+    sky_material.sky_top_color = Color("#7195b7")
+    sky_material.sky_horizon_color = Color("#c8c5b2")
+    sky_material.ground_horizon_color = Color("#c8c5b2")
+    var atmosphere := Sky.new()
+    atmosphere.sky_material = sky_material
+    e.background_mode = Environment.BG_SKY
+    e.sky = atmosphere
+    e.fog_enabled = true
+    e.fog_light_color = Color("#c3bba7")
+    e.fog_density = 0.006
     e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
     e.ambient_light_color = Color(0.75,0.8,0.9)
-    e.ambient_light_energy = 0.6
+    e.ambient_light_energy = 0.67
     env.environment = e
     add_child(env)
+
+func _street_surface(color: Color, kind: int) -> ShaderMaterial:
+    var material := ShaderMaterial.new()
+    material.shader = STREET_SURFACE
+    material.set_shader_parameter("base", color)
+    material.set_shader_parameter("surface_kind", kind)
+    return material
+
+func _build_shop(z: float, index: int, stone: Material) -> void:
+    var canvas := Color("#53756b") if index % 2 == 0 else Color("#985746")
+    _box(Vector3(11.05, 1.55, z), Vector3(1.15, 3.1, 3.7), Color.WHITE, true, stone)
+    _box(Vector3(10.44, 1.12, z), Vector3(0.08, 2.05, 2.9), Color("#343732"), false)
+    _box(Vector3(10.39, 1.74, z), Vector3(0.08, 0.10, 2.94), Color("#a09274"), false)
+    for side in [-1, 0, 1]:
+        _box(Vector3(10.38, 1.15, z + side * 1.43), Vector3(0.10, 2.15, 0.09), Color("#88775f"), false)
+    _box(Vector3(9.95, 2.45, z), Vector3(1.65, 0.14, 3.72), canvas, false)
+    _box(Vector3(9.15, 2.37, z), Vector3(0.09, 0.23, 3.75), canvas.darkened(0.15), false)
+    var signboard := Label3D.new()
+    signboard.font = UI_FONT
+    signboard.text = "بقالة السوق" if index % 2 == 0 else "أقمشة حلب"
+    signboard.font_size = 44
+    signboard.pixel_size = 0.009
+    signboard.modulate = Color("#f4ddad")
+    signboard.outline_size = 5
+    signboard.position = Vector3(10.40, 2.80, z)
+    signboard.rotation.y = -PI * 0.5
+    add_child(signboard)
+
+func _street_lamp(at: Vector3) -> void:
+    var steel := Color("#474943")
+    _box(at + Vector3(0, 1.9, 0), Vector3(0.10, 3.8, 0.10), steel, false)
+    _box(at + Vector3(0, 0.19, 0), Vector3(0.28, 0.38, 0.28), steel, false)
+    var side := -signf(at.x)
+    _box(at + Vector3(side * 0.42, 3.82, 0), Vector3(0.90, 0.09, 0.10), steel, false)
+    _box(at + Vector3(side * 0.82, 3.77, 0), Vector3(0.37, 0.12, 0.23), Color("#d5c8a8"), false)
 
 func _build_pedestrians() -> void:
     pedestrians = Node3D.new()
