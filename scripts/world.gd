@@ -1,5 +1,6 @@
 extends Node3D
 
+const UI_FONT := preload("res://assets/fonts/DejaVuSans-UI.ttf")
 const SPEED := 6.0
 const JUMP_SPEED := 6.0
 const GRAVITY := 18.0
@@ -155,7 +156,9 @@ func _build_ui() -> void:
     hud.offset_left = -660
     hud.offset_right = -24
     hud.offset_top = 20
-    hud.add_theme_font_size_override("font_size", 28)
+    hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    hud.add_theme_font_override("font", UI_FONT)
+    hud.add_theme_font_size_override("font_size", 25)
     hud.add_theme_constant_override("outline_size", 8)
     overlay.add_child(hud)
     minimap.position = Vector2(24, 24)
@@ -195,6 +198,7 @@ func _touch_action(parent: Control, title: String, location: Vector2, callback: 
     label.size = extent
     label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    label.add_theme_font_override("font", UI_FONT)
     label.add_theme_font_size_override("font_size", 22)
     label.mouse_filter = Control.MOUSE_FILTER_IGNORE
     button.add_child(label)
@@ -205,6 +209,7 @@ func _touch_action(parent: Control, title: String, location: Vector2, callback: 
 func _button(parent: Control, label: String, offset: Vector2) -> Button:
     var button := Button.new()
     button.text = label
+    button.add_theme_font_override("font", UI_FONT)
     button.focus_mode = Control.FOCUS_NONE
     button.add_theme_font_size_override("font_size", 24)
     button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
