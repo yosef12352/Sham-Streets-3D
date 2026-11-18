@@ -34,3 +34,17 @@ godot --headless --path . --export-release "Android Release" build/sham-streets.
 ```
 
 راجع [سجل التطوير والاختبارات](docs/PROGRESS.md).
+
+## معاينة الويب للموبايل
+
+يستخدم إعداد `Web Mobile` قالب الويب الرسمي دون خيوط وشاشة بدء عربية. بعد تثبيت القالب المطابق لـGodot 4.6.3، نفّذ من جذر المشروع:
+
+```bash
+mkdir -p build/web
+touch build/web/.gdignore
+godot --headless --path . --export-release "Web Mobile" build/web/index.html
+gzip -n -9 -f build/web/index.wasm
+python3 -m http.server 8765 --directory build/web
+```
+
+تُخدّم ملفات هذا المجلد عبر HTTPS عند النشر. قدّم `index.wasm.gz` كما هو، إذ تفك شاشة البدء ضغطه في المتصفح. يتطلب التشغيل WebGL 2.

@@ -145,7 +145,7 @@ func _build_ui() -> void:
     overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
     ui.add_child(overlay)
     hud = Label.new()
-    hud.layout_direction = Control.LAYOUT_DIRECTION_RTL
+    hud.text_direction = Control.TEXT_DIRECTION_RTL
     hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     hud.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
     hud.offset_left = -660
