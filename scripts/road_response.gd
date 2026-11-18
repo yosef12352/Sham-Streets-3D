@@ -6,6 +6,7 @@ const TRAFFIC_START := Vector3(3, 0.66, -82)
 const RESPONSE_INTERVAL := 9.0
 
 var traffic: ShamVehicleController
+var local_traffic: Array[ShamVehicleController] = []
 var patrol: ShamVehicleController
 var traffic_heading := 1.0
 var remaining := 0.0
@@ -13,6 +14,12 @@ var contact_cooldown := 0.0
 
 func _ready() -> void:
     traffic = _spawn(TRAFFIC_START, Color("#b58f58"))
+    local_traffic.append(_spawn(Vector3(113, 0.66, -112), Color("#788b83")))
+    local_traffic.append(_spawn(Vector3(-107, 0.66, 28), Color("#8c716b")))
+    local_traffic.append(_spawn(Vector3(-113, 0.66, -75), Color("#a3a2a7")))
+    for index in range(local_traffic.size()):
+        local_traffic[index].rotation.y = PI if index != 1 else 0.0
+        local_traffic[index].set_mobile_controls(0.60 + 0.10 * index, 0.0, false)
     patrol = _spawn(PATROL_START, Color("#526da6"))
     patrol.hide()
     patrol.collision_layer = 0
@@ -40,9 +47,17 @@ func tick(delta: float, player_car: ShamVehicleController, actor_position: Vecto
     elif is_zero_approx(traffic.rotation.y) and traffic_heading > 0.0:
         traffic.rotation.y = PI
     traffic.set_mobile_controls(0.55, 0.0, false)
+    for local_car in local_traffic:
+        if local_car.position.z > 151 and local_car.rotation.y > 1.0:
+            local_car.rotation.y = 0
+            local_car.forward_speed = 0.0
+        elif local_car.position.z < -151 and local_car.rotation.y < 1.0:
+            local_car.rotation.y = PI
+            local_car.forward_speed = 0.0
     if player_car.driver_active and contact_cooldown == 0.0:
         for index in range(player_car.get_slide_collision_count()):
-            if player_car.get_slide_collision(index).get_collider() == traffic:
+            var other := player_car.get_slide_collision(index).get_collider()
+            if other is ShamVehicleController and (other == traffic or local_traffic.has(other)):
                 state.set_wanted(state.wanted_level + 1)
                 remaining = RESPONSE_INTERVAL
                 contact_cooldown = 2.5

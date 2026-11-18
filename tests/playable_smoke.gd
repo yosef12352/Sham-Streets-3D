@@ -92,11 +92,13 @@ func _run() -> void:
     third.road_response.remaining = 0.0
     await frames(3)
     check(third.state.wanted_level == 0 and not third.road_response.patrol.visible, "Patrol should end at zero")
-    check(third.pedestrians.get_child_count() == 24, "City should have twenty-four residents")
+    check(third.pedestrians.get_child_count() == 32, "City should have thirty-two residents")
     check(third.car.get_node("Trim").get_child_count() >= 8, "Car trim should be attached")
     third.action_requested = "pulse"
     await frames(2)
     check(third.rounds == 7, "A shot should consume a round")
+    check(third.person.launcher.visible and third.person.aim_weight > 0.8, "A shot should align the launcher and both arms")
+    check(third.person.muzzle.global_position.distance_to(third.player.position) > 0.5, "Shot origin should be at the visible muzzle")
     third.action_requested = "pulse"
     await frames(2)
     check(third.rounds == 7, "Shot cooldown should prevent duplicate shots")
@@ -117,6 +119,12 @@ func _run() -> void:
     check(not third.pedestrians.get_child(0).visible, "Distant market residents should be hidden")
     check(third._save(), "Expanded district should be saveable")
     check(third._position_from_save(ShamSaveSystem.load_game().get("position"), Vector3.ZERO).x < -100.0, "Expanded coordinates should restore")
+    third._toggle_map()
+    check(third.map_layer.visible and not third.gameplay_ui.visible, "Map should replace game controls")
+    third._select_district(2)
+    check(third.navigation == 2 and third.minimap.navigation == 2 and not third.map_layer.visible, "Selecting Hanano should show the route in the HUD")
+    check(third.current_district == 3, "West side should be identified as Maysaloun")
+    check(third.road_response.local_traffic.size() == 3, "Satellite roads should have AI traffic")
     var corrupted := FileAccess.open(ShamSaveSystem.SAVE_PATH, FileAccess.WRITE)
     corrupted.store_string("{truncated")
     corrupted.close()

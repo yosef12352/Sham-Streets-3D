@@ -28,7 +28,13 @@ var road_response := preload("res://scripts/road_response.gd").new()
 var state := ShamGameState.new()
 var missions := ShamMissionManager.new()
 var hud: Label
-var minimap := preload("res://scripts/market_map.gd").new()
+const MAP_VIEW := preload("res://scripts/market_map.gd")
+var minimap := MAP_VIEW.new()
+var district_map := MAP_VIEW.new()
+var navigation := -1
+var current_district := 0
+var map_layer: Control
+var gameplay_ui: Control
 var marker: MeshInstance3D
 var driving := false
 var braking := false
@@ -90,6 +96,7 @@ func _build_city() -> void:
     _box(Vector3(0,-0.5,0), Vector3(CITY.HALF_SIZE * 2, 1, CITY.HALF_SIZE * 2), Color(0.64,0.58,0.46))
     add_child(districts)
     _build_pedestrians()
+    _build_district_signs()
     var asphalt := _street_surface(Color("#555557"), 0)
     var paving := _street_surface(Color("#bdab90"), 1)
     var shop_stone := _street_surface(Color("#ae9171"), 2)
@@ -141,6 +148,28 @@ func _build_city() -> void:
     e.ambient_light_energy = 0.67
     env.environment = e
     add_child(env)
+
+func _build_district_signs() -> void:
+    for district: Dictionary in CITY.DISTRICTS:
+        var district_entry: Vector3 = district.point
+        if district.name == "حيدرية":
+            district_entry.z = -12.0
+        var edge := district_entry + Vector3(6.4, 0, 0)
+        var metal := Color("#353f3c")
+        for side in [-1, 1]:
+            _box(edge + Vector3(side * 0.96, 1.57, 0), Vector3(0.11, 3.14, 0.11), metal, false)
+        _box(edge + Vector3(0, 2.78, 0), Vector3(3.15, 0.85, 0.17), district.color.darkened(0.64), false)
+        for face in [-1, 1]:
+            var title := Label3D.new()
+            title.font = UI_FONT
+            title.text = "حلب  " + district.name
+            title.font_size = 50
+            title.pixel_size = 0.009
+            title.outline_size = 3
+            title.modulate = Color("#fff1d1")
+            title.rotation.y = (face + 1) * PI * 0.5
+            title.position = edge + Vector3(0, 2.78, -face * 0.11)
+            add_child(title)
 
 func _build_park(paving: Material) -> void:
     var center: Vector3 = CITY.PARK + Vector3(-11, 0, -11)
@@ -204,10 +233,12 @@ func _build_pedestrians() -> void:
     pedestrians.name = "MarketPedestrians"
     add_child(pedestrians)
     var colors := [Color(0.63, 0.31, 0.23), Color(0.26, 0.39, 0.52), Color(0.50, 0.42, 0.25)]
-    for index in range(24):
+    for index in range(32):
         var side := -1 if index % 2 == 1 else 1
         var from := Vector3(side * 8.45, 0.93, 8 + (index / 2) * 12)
-        if index >= 12:
+        if index >= 24:
+            from = Vector3(110 + side * 8.45, 0.93, -88 + ((index - 24) / 2) * 16)
+        elif index >= 12:
             from = Vector3(-110 + side * 8.45, 0.93, -91 + ((index - 12) / 2) * 13)
         var to := from + Vector3(0, 0, 8)
         var pedestrian := preload("res://scripts/market_pedestrian.gd").new()
@@ -244,6 +275,7 @@ func _build_ui() -> void:
     overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
     ui.add_child(overlay)
+    gameplay_ui = overlay
     hud = Label.new()
     hud.text_direction = Control.TEXT_DIRECTION_RTL
     hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -260,6 +292,8 @@ func _build_ui() -> void:
     minimap.size = Vector2(168, 168)
     minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
     overlay.add_child(minimap)
+    _touch_action(overlay, "الخريطة", Vector2(24, 200), func() -> void: _toggle_map(), Vector2(168, 50))
+    _build_map_panel(ui)
     action_button = _touch_action(overlay, "تفاعل / ركوب", Vector2(1110, 620), _request_interaction, Vector2(146, 68), true)
     foot_buttons.append(_touch_action(overlay, "ضرب", Vector2(1110, 542), func() -> void: action_requested = "strike", Vector2(146, 68)))
     foot_buttons.append(_touch_action(overlay, "إطلاق", Vector2(976, 542), func() -> void: action_requested = "pulse"))
@@ -276,6 +310,62 @@ func _build_ui() -> void:
     _movement_button(overlay, "▼", Vector2(105, 620), Vector2.DOWN)
     _movement_button(overlay, "◀", Vector2(22, 565), Vector2.LEFT)
     _movement_button(overlay, "▶", Vector2(188, 565), Vector2.RIGHT)
+
+func _build_map_panel(layer: CanvasLayer) -> void:
+    map_layer = ColorRect.new()
+    (map_layer as ColorRect).color = Color("#101a1cef")
+    map_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    layer.add_child(map_layer)
+    district_map.expanded = true
+    district_map.position = Vector2(65, 70)
+    district_map.size = Vector2(570, 570)
+    district_map.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    map_layer.add_child(district_map)
+    var actions := VBoxContainer.new()
+    actions.position = Vector2(715, 125)
+    actions.custom_minimum_size.x = 475
+    actions.add_theme_constant_override("separation", 12)
+    map_layer.add_child(actions)
+    var title := Label.new()
+    title.text = "خريطة أحياء حلب"
+    title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    title.add_theme_font_override("font", UI_FONT)
+    title.add_theme_font_size_override("font_size", 40)
+    actions.add_child(title)
+    for index in range(CITY.DISTRICTS.size()):
+        _map_button(actions, CITY.DISTRICTS[index].name, _select_district.bind(index))
+    _map_button(actions, "إزالة المسار", _select_district.bind(-1))
+    _map_button(actions, "رجوع للعبة", _toggle_map)
+    map_layer.hide()
+
+func _map_button(parent: Control, title: String, callback: Callable) -> void:
+    var button := Button.new()
+    button.text = title
+    button.focus_mode = Control.FOCUS_NONE
+    button.custom_minimum_size.y = 50
+    button.add_theme_font_override("font", UI_FONT)
+    button.add_theme_font_size_override("font_size", 24)
+    button.pressed.connect(callback)
+    parent.add_child(button)
+
+func _select_district(index: int) -> void:
+    navigation = index
+    district_map.set_navigation(index)
+    minimap.set_navigation(index)
+    _toggle_map()
+    _refresh_ui()
+
+func _toggle_map() -> void:
+    map_layer.visible = not map_layer.visible
+    gameplay_ui.visible = not map_layer.visible
+    stick = Vector2.ZERO
+    touch_id = -1
+    camera_fingers.clear()
+    camera_span = 0.0
+    pad_touches.clear()
+    braking = false
+    action_requested = ""
+    interact_requested = false
 
 func _movement_button(parent: Control, title: String, location: Vector2, direction: Vector2) -> void:
     var button := _touch_action(parent, title, location, func() -> void: pad_touches[direction] = true, Vector2(72, 60))
@@ -358,7 +448,9 @@ func _refresh_ui(message := "") -> void:
         objective += " · قيادة"
     else:
         objective += " · ذخيرة %d / %d" % [rounds, reserve]
-    hud.text = "سوق حلب  |  الرصيد %d  |  المطلوبية %d/5\n%s" % [state.money, state.wanted_level, objective]
+    hud.text = "حلب · %s  |  الرصيد %d  |  المطلوبية %d/5\n%s" % [CITY.DISTRICTS[current_district].name, state.money, state.wanted_level, objective]
+    if navigation >= 0:
+        hud.text += "\nالوجهة · " + CITY.DISTRICTS[navigation].name
     if not message.is_empty():
         hud.text += "\n" + message
 
@@ -475,6 +567,12 @@ func _notification(what: int) -> void:
         _save()
 
 func _unhandled_input(event: InputEvent) -> void:
+    if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode in [KEY_M, KEY_ESCAPE]:
+        if event.physical_keycode == KEY_M or map_layer.visible:
+            _toggle_map()
+        return
+    if map_layer.visible:
+        return
     if event is InputEventKey and event.pressed and not event.echo:
         match event.physical_keycode:
             KEY_EQUAL, KEY_KP_ADD:
@@ -556,12 +654,14 @@ func _physics_process(delta: float) -> void:
     for direction: Vector2 in pad_touches:
         input_dir += direction
     input_dir = input_dir.limit_length()
+    if map_layer.visible:
+        input_dir = Vector2.ZERO
     _update_actions(delta)
     sounds.set_engine(car.forward_speed, driving)
     if stick.length() > 0.1:
         input_dir = stick
     if driving:
-        car.set_mobile_controls(-input_dir.y, input_dir.x, braking or Input.is_physical_key_pressed(KEY_SPACE))
+        car.set_mobile_controls(-input_dir.y, input_dir.x, map_layer.visible or braking or Input.is_physical_key_pressed(KEY_SPACE))
         if car.position.y < -8:
             car.position = CAR_SPAWN
             car.velocity = Vector3.ZERO
@@ -580,14 +680,13 @@ func _physics_process(delta: float) -> void:
         player.move_and_slide()
         var pace := Vector2(player.get_real_velocity().x, player.get_real_velocity().z).length()
         var aiming := last_action == "pulse" and action_cooldown > 0.0
-        person.launcher.visible = aiming
         var strike := action_cooldown / 0.34 if last_action == "strike" else 0.0
         person.animate(delta, pace, player.is_on_floor(), strike, aiming)
         step_delay -= delta
         if pace > 0.9 and player.is_on_floor() and step_delay <= 0.0:
             sounds.play_effect("step", -22)
             step_delay = clampf(1.65 / pace, 0.19, 0.53)
-        if direction.length() > 0.1:
+        if direction.length() > 0.1 and not aiming:
             player.rotation.y = lerp_angle(player.rotation.y, atan2(-direction.x, -direction.z), 1.0 - exp(-delta * 19.0))
         if player.position.y < -8:
             player.position = SPAWN
@@ -600,7 +699,13 @@ func _physics_process(delta: float) -> void:
             var near: bool = actor_position.distance_squared_to(pedestrian.position) < 65.0 * 65.0
             pedestrian.visible = near
             pedestrian.set_physics_process(near)
-    minimap.update_positions(actor_position, marker.position, (car if driving else player).rotation.y)
+    var district := CITY.district_index(actor_position)
+    if district != current_district:
+        current_district = district
+        _refresh_ui()
+    var heading_on_map := (car if driving else player).rotation.y
+    minimap.update_positions(actor_position, marker.position, heading_on_map)
+    district_map.update_positions(actor_position, marker.position, heading_on_map)
     road_response.tick(delta, car, actor_position, state)
     var focus := actor_position + Vector3.UP * 0.95
     var heading := yaw + (car.rotation.y if driving else 0.0)
@@ -641,6 +746,8 @@ func _update_actions(delta: float) -> void:
             rounds -= 1
             action_cooldown = 0.40
             sounds.play_effect("pulse")
+            player.rotation.y = yaw
+            person.ready_aim()
             _react_to_action(11.0)
         "strike":
             action_cooldown = 0.34
@@ -649,13 +756,14 @@ func _update_actions(delta: float) -> void:
     _refresh_ui()
 
 func _react_to_action(reach: float) -> void:
-    var origin := player.global_position
-    var forward := -player.global_basis.z
+    var ranged := reach > 2.0
+    var origin := person.muzzle.global_position if ranged else player.global_position
+    var forward := -person.muzzle.global_basis.z if ranged else -player.global_basis.z
     var end := origin + forward * reach
     var query := PhysicsRayQueryParameters3D.create(origin, end, 3, [player.get_rid()])
     var hit := get_world_3d().direct_space_state.intersect_ray(query)
-    if reach > 2.0:
-        _pulse_flash(origin + Vector3.UP * 0.35, hit.get("position", end) + Vector3.UP * 0.35)
+    if ranged:
+        _pulse_flash(origin, hit.get("position", end))
     if not hit.is_empty() and hit.collider.has_method("react"):
         hit.collider.react()
         state.set_wanted(state.wanted_level + 1)
@@ -673,7 +781,7 @@ func _pulse_flash(from: Vector3, to: Vector3) -> void:
     segment.material = material
     beam.mesh = segment
     beam.position = from.lerp(to, 0.5)
-    var axis := (to - from).normalized()
+    var axis := (to - from).normalized() if from.distance_squared_to(to) > 0.0001 else Vector3.UP
     beam.basis = Basis(Quaternion(Vector3.UP, axis))
     add_child(beam)
     var tween := beam.create_tween()
