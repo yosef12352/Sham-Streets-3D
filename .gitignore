@@ -12,3 +12,7 @@ export.cfg
 secrets/
 *.keystore
 *.jks
+
+# Android build outputs and local Gradle project
+/build/
+/android/

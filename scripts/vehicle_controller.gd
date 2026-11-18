@@ -30,13 +30,19 @@ func exit_vehicle() -> void:
 func _physics_process(delta: float) -> void:
     var target_throttle: float = throttle_input if driver_active else 0.0
     var engine_force: float = acceleration if target_throttle >= 0.0 else reverse_acceleration
-    forward_speed = move_toward(forward_speed, target_throttle * maximum_speed, engine_force * delta) if absf(target_throttle) > 0.01 else move_toward(forward_speed, 0.0, (braking if brake_input else drag) * delta)
     if brake_input:
         forward_speed = move_toward(forward_speed, 0.0, braking * delta)
+    elif absf(target_throttle) > 0.01:
+        var speed_limit := maximum_speed if target_throttle > 0.0 else maximum_speed * 0.4
+        forward_speed = move_toward(forward_speed, target_throttle * speed_limit, engine_force * delta)
+    else:
+        forward_speed = move_toward(forward_speed, 0.0, drag * delta)
     if absf(forward_speed) > 0.2:
         rotate_y(-steering_input * steering_speed * delta * signf(forward_speed) * minf(absf(forward_speed) / 6.0, 1.0))
     var forward: Vector3 = -global_transform.basis.z
     velocity.x = forward.x * forward_speed
     velocity.z = forward.z * forward_speed
-    velocity.y = -gravity if not is_on_floor() else -0.1
+    velocity.y = velocity.y - gravity * delta if not is_on_floor() else -0.1
     move_and_slide()
+    if is_on_wall():
+        forward_speed = get_real_velocity().dot(forward)
