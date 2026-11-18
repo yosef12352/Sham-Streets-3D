@@ -1,6 +1,8 @@
 extends CharacterBody3D
 class_name ShamVehicleController
 
+signal hard_collision(speed_lost: float)
+
 @export var acceleration: float = 17.0
 @export var reverse_acceleration: float = 9.0
 @export var maximum_speed: float = 24.0
@@ -43,6 +45,10 @@ func _physics_process(delta: float) -> void:
     velocity.x = forward.x * forward_speed
     velocity.z = forward.z * forward_speed
     velocity.y = velocity.y - gravity * delta if not is_on_floor() else -0.1
+    var before := absf(forward_speed)
     move_and_slide()
     if is_on_wall():
         forward_speed = get_real_velocity().dot(forward)
+        var speed_lost := before - absf(forward_speed)
+        if speed_lost >= 6.0:
+            hard_collision.emit(speed_lost)

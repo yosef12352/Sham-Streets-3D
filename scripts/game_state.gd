@@ -4,11 +4,26 @@ class_name ShamGameState
 signal money_changed(amount: int)
 signal wanted_changed(level: int)
 signal outfit_changed(outfit_id: String)
+signal vitals_changed
 
+var health := 100
+var armor := 50
 var money: int = 0
 var wanted_level: int = 0
 var outfit_id: String = "default"
 var completed_missions: Array[String] = []
+
+func damage(points: int) -> void:
+    var incoming := maxi(points, 0)
+    var absorbed := mini(armor, incoming)
+    armor -= absorbed
+    health = maxi(0, health - (incoming - absorbed))
+    vitals_changed.emit()
+
+func reset_vitals() -> void:
+    health = 100
+    armor = 50
+    vitals_changed.emit()
 
 func earn_money(amount: int) -> void:
     if amount <= 0:
@@ -41,9 +56,11 @@ func complete_mission(id: String, reward: int) -> bool:
     return true
 
 func to_dict() -> Dictionary:
-    return {"money":money,"wanted_level":wanted_level,"outfit_id":outfit_id,"completed_missions":completed_missions}
+    return {"health": health, "armor": armor, "money":money,"wanted_level":wanted_level,"outfit_id":outfit_id,"completed_missions":completed_missions}
 
 func restore(data: Dictionary) -> void:
+    health = clampi(int(data.get("health", 100)), 1, 100)
+    armor = clampi(int(data.get("armor", 50)), 0, 100)
     money = maxi(0, int(data.get("money", 0)))
     wanted_level = clampi(int(data.get("wanted_level", 0)), 0, 5)
     outfit_id = str(data.get("outfit_id", "default"))

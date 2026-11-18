@@ -20,6 +20,20 @@ var camera_span := 0.0
 var foot_buttons: Array[TouchScreenButton] = []
 var car_buttons: Array[TouchScreenButton] = []
 var action_button: TouchScreenButton
+var vehicle_button: TouchScreenButton
+var vehicle_requested := false
+var jump_buffer := 0.0
+var camera_reach := 7.0
+var vitals: VBoxContainer
+var health_bar: ProgressBar
+var armor_bar: ProgressBar
+var health_text: Label
+var armor_text: Label
+var message_text: Label
+var message_remaining := 0.0
+var damage_cooldown := 0.0
+var respawn_pending := false
+const BOARD_DISTANCE := 5.0
 var movement_focus := Vector3(INF, 0, INF)
 var car: ShamVehicleController
 var districts := preload("res://scripts/district_stream.gd").new()
@@ -68,6 +82,8 @@ func _ready() -> void:
     _build_ui()
     _build_marker()
     _restore()
+    state.vitals_changed.connect(_update_vitals)
+    _update_vitals()
     state.wanted_changed.connect(func(_level: int) -> void: _refresh_ui())
     districts.update_focus(car.position if driving else player.position)
     _refresh_ui()
@@ -249,6 +265,8 @@ func _build_player() -> void:
     player = CharacterBody3D.new()
     player.position = SPAWN
     player.collision_mask = 3
+    player.floor_snap_length = 0.25
+    player.floor_stop_on_slope = true
     var collision := CollisionShape3D.new()
     var capsule := CapsuleShape3D.new()
     capsule.radius = 0.4
@@ -266,6 +284,7 @@ func _build_player() -> void:
 func _build_car() -> void:
     car = preload("res://scenes/market_car.tscn").instantiate()
     car.position = CAR_SPAWN
+    car.hard_collision.connect(_on_car_impact)
     add_child(car)
 
 func _build_ui() -> void:
@@ -280,36 +299,105 @@ func _build_ui() -> void:
     hud.text_direction = Control.TEXT_DIRECTION_RTL
     hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     hud.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-    hud.offset_left = -660
+    hud.offset_left = -610
     hud.offset_right = -24
     hud.offset_top = 20
     hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     hud.add_theme_font_override("font", UI_FONT)
-    hud.add_theme_font_size_override("font_size", 25)
-    hud.add_theme_constant_override("outline_size", 8)
+    hud.add_theme_font_size_override("font_size", 23)
+    hud.add_theme_color_override("font_color", Color("#f6eedb"))
+    hud.add_theme_color_override("font_outline_color", Color("#101716"))
+    hud.add_theme_constant_override("outline_size", 7)
+    hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
     overlay.add_child(hud)
+    _build_vitals(overlay)
     minimap.position = Vector2(24, 24)
     minimap.size = Vector2(168, 168)
     minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
     overlay.add_child(minimap)
-    _touch_action(overlay, "الخريطة", Vector2(24, 200), func() -> void: _toggle_map(), Vector2(168, 50))
+    _touch_action(overlay, "خريطة", Vector2(70, 202), _toggle_map, 76)
     _build_map_panel(ui)
-    action_button = _touch_action(overlay, "تفاعل / ركوب", Vector2(1110, 620), _request_interaction, Vector2(146, 68), true)
-    foot_buttons.append(_touch_action(overlay, "ضرب", Vector2(1110, 542), func() -> void: action_requested = "strike", Vector2(146, 68)))
-    foot_buttons.append(_touch_action(overlay, "إطلاق", Vector2(976, 542), func() -> void: action_requested = "pulse"))
-    foot_buttons.append(_touch_action(overlay, "تلقيم", Vector2(842, 542), func() -> void: action_requested = "reload"))
-    foot_buttons.append(_touch_action(overlay, "قفز", Vector2(976, 620), _jump))
-    car_buttons.append(_touch_action(overlay, "بوق", Vector2(842, 620), func() -> void: action_requested = "horn"))
-    var brake := _touch_action(overlay, "فرامل", Vector2(976, 620), func() -> void: braking = true)
+    vehicle_button = _touch_action(overlay, "ركوب", Vector2(1145, 598), _request_vehicle, 106, true)
+    action_button = _touch_action(overlay, "تفاعل", Vector2(1038, 610), _request_interaction, 86)
+    foot_buttons.append(_touch_action(overlay, "ضرب", Vector2(1147, 491), func() -> void: action_requested = "strike", 91))
+    foot_buttons.append(_touch_action(overlay, "إطلاق", Vector2(1048, 506), func() -> void: action_requested = "pulse", 90))
+    foot_buttons.append(_touch_action(overlay, "تلقيم", Vector2(949, 520), func() -> void: action_requested = "reload", 83))
+    foot_buttons.append(_touch_action(overlay, "قفز", Vector2(942, 610), _jump, 86))
+    car_buttons.append(_touch_action(overlay, "بوق", Vector2(942, 610), func() -> void: action_requested = "horn", 86))
+    var brake := _touch_action(overlay, "فرامل", Vector2(1038, 610), func() -> void: braking = true, 86)
     brake.released.connect(func() -> void: braking = false)
     car_buttons.append(brake)
-    _button(overlay, "حفظ", Vector2(-148, -324)).pressed.connect(_save_with_feedback)
-    _touch_action(overlay, "+ تقريب", Vector2(1112, 468), func() -> void: _adjust_zoom(-0.15), Vector2(144, 56))
-    _touch_action(overlay, "- إبعاد", Vector2(958, 468), func() -> void: _adjust_zoom(0.15), Vector2(144, 56))
-    _movement_button(overlay, "▲", Vector2(105, 510), Vector2.UP)
-    _movement_button(overlay, "▼", Vector2(105, 620), Vector2.DOWN)
-    _movement_button(overlay, "◀", Vector2(22, 565), Vector2.LEFT)
-    _movement_button(overlay, "▶", Vector2(188, 565), Vector2.RIGHT)
+    _touch_action(overlay, "حفظ", Vector2(1179, 386), _save_with_feedback, 67)
+    _touch_action(overlay, "+ قرب", Vector2(1104, 394), func() -> void: _adjust_zoom(-0.15), 67)
+    _touch_action(overlay, "- بعد", Vector2(1029, 402), func() -> void: _adjust_zoom(0.15), 67)
+    _movement_button(overlay, "▲", Vector2(108, 488), Vector2.UP)
+    _movement_button(overlay, "▼", Vector2(108, 642), Vector2.DOWN)
+    _movement_button(overlay, "◀", Vector2(30, 565), Vector2.LEFT)
+    _movement_button(overlay, "▶", Vector2(186, 565), Vector2.RIGHT)
+
+func _build_vitals(overlay: Control) -> void:
+    var frame := PanelContainer.new()
+    frame.position = Vector2(1018, 145)
+    frame.custom_minimum_size = Vector2(236, 114)
+    frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    var background := StyleBoxFlat.new()
+    background.bg_color = Color("#152423e8")
+    background.set_corner_radius_all(14)
+    background.content_margin_left = 13
+    background.content_margin_right = 13
+    background.content_margin_top = 7
+    background.content_margin_bottom = 7
+    frame.add_theme_stylebox_override("panel", background)
+    overlay.add_child(frame)
+    vitals = VBoxContainer.new()
+    vitals.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    vitals.add_theme_constant_override("separation", 3)
+    frame.add_child(vitals)
+    health_text = _vital_label()
+    health_bar = _vital_bar(Color("#eb8c72"))
+    armor_text = _vital_label()
+    armor_bar = _vital_bar(Color("#83c6e6"))
+    message_text = Label.new()
+    message_text.position = Vector2(452, 145)
+    message_text.size = Vector2(535, 48)
+    message_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    message_text.add_theme_font_override("font", UI_FONT)
+    message_text.add_theme_font_size_override("font_size", 21)
+    message_text.add_theme_color_override("font_color", Color("#fff0cc"))
+    message_text.add_theme_constant_override("outline_size", 8)
+    message_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    overlay.add_child(message_text)
+
+func _vital_label() -> Label:
+    var label := Label.new()
+    label.add_theme_font_override("font", UI_FONT)
+    label.add_theme_font_size_override("font_size", 19)
+    label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    vitals.add_child(label)
+    return label
+
+func _vital_bar(tint: Color) -> ProgressBar:
+    var bar := ProgressBar.new()
+    bar.show_percentage = false
+    bar.custom_minimum_size.y = 8
+    bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    var fill := StyleBoxFlat.new()
+    fill.bg_color = tint
+    fill.set_corner_radius_all(4)
+    var track := StyleBoxFlat.new()
+    track.bg_color = Color("#3a4948")
+    track.set_corner_radius_all(4)
+    bar.add_theme_stylebox_override("fill", fill)
+    bar.add_theme_stylebox_override("background", track)
+    vitals.add_child(bar)
+    return bar
+
+func _update_vitals() -> void:
+    health_bar.value = state.health
+    armor_bar.value = state.armor
+    health_text.text = "الصحة  %d / 100" % state.health
+    armor_text.text = "الدرع  %d / 100" % state.armor
 
 func _build_map_panel(layer: CanvasLayer) -> void:
     map_layer = ColorRect.new()
@@ -366,56 +454,48 @@ func _toggle_map() -> void:
     braking = false
     action_requested = ""
     interact_requested = false
+    vehicle_requested = false
+    jump_buffer = 0.0
 
 func _movement_button(parent: Control, title: String, location: Vector2, direction: Vector2) -> void:
-    var button := _touch_action(parent, title, location, func() -> void: pad_touches[direction] = true, Vector2(72, 60))
+    var button := _touch_action(parent, title, location, func() -> void: pad_touches[direction] = true, 68)
     button.released.connect(func() -> void: pad_touches.erase(direction))
 
-func _touch_action(parent: Control, title: String, location: Vector2, callback: Callable, extent := Vector2(124, 68), primary := false) -> TouchScreenButton:
+func _touch_action(parent: Control, title: String, location: Vector2, callback: Callable, diameter := 86, primary := false) -> TouchScreenButton:
     var button := TouchScreenButton.new()
     button.position = location
-    button.texture_normal = _button_texture(extent, Color("#233336ed") if not primary else Color("#355551f5"))
-    button.texture_pressed = _button_texture(extent, Color("#53695ced"))
+    button.texture_normal = _button_texture(diameter, Color("#213538ed") if not primary else Color("#327368fa"))
+    button.texture_pressed = _button_texture(diameter, Color("#77947ff5"))
+    var hit := CircleShape2D.new()
+    hit.radius = diameter * 0.5
+    button.shape = hit
     var label := Label.new()
     label.name = "Caption"
     label.text = title
-    label.size = extent
+    label.size = Vector2.ONE * diameter
     label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
     label.add_theme_font_override("font", UI_FONT)
-    label.add_theme_font_size_override("font_size", 22)
+    label.add_theme_font_size_override("font_size", 20 if diameter < 96 else 24)
+    label.add_theme_color_override("font_color", Color("#fff4df"))
     label.mouse_filter = Control.MOUSE_FILTER_IGNORE
     button.add_child(label)
     button.pressed.connect(callback)
     parent.add_child(button)
     return button
 
-func _button_texture(extent: Vector2, fill: Color) -> ImageTexture:
-    var image := Image.create(int(extent.x), int(extent.y), false, Image.FORMAT_RGBA8)
-    var radius := 13.0
-    for y in range(image.get_height()):
-        for x in range(image.get_width()):
-            var position := Vector2(x + 0.5, y + 0.5)
-            var corner := position.clamp(Vector2.ONE * radius, extent - Vector2.ONE * radius)
-            var distance := (position - corner).length()
+func _button_texture(diameter: int, fill: Color) -> ImageTexture:
+    var image := Image.create(diameter, diameter, false, Image.FORMAT_RGBA8)
+    var radius := diameter * 0.5
+    var center := Vector2.ONE * radius
+    for y in range(diameter):
+        for x in range(diameter):
+            var distance := Vector2(x + 0.5, y + 0.5).distance_to(center)
             if distance < radius:
-                var shade := fill.lightened(0.33) if distance > radius - 1.7 else fill
+                var shade := fill.lightened(0.33) if distance > radius - 2.4 else fill
+                shade.a *= clampf(radius - distance, 0.0, 1.0)
                 image.set_pixel(x, y, shade)
     return ImageTexture.create_from_image(image)
-
-func _button(parent: Control, label: String, offset: Vector2) -> Button:
-    var button := Button.new()
-    button.text = label
-    button.add_theme_font_override("font", UI_FONT)
-    button.focus_mode = Control.FOCUS_NONE
-    button.add_theme_font_size_override("font_size", 24)
-    button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-    button.offset_left = offset.x
-    button.offset_top = offset.y
-    button.offset_right = offset.x + 124
-    button.offset_bottom = offset.y + 72
-    parent.add_child(button)
-    return button
 
 func _build_marker() -> void:
     marker = MeshInstance3D.new()
@@ -435,7 +515,8 @@ func _refresh_ui(message := "") -> void:
         button.visible = not driving
     for button in car_buttons:
         button.visible = driving
-    (action_button.get_node("Caption") as Label).text = "نزول" if driving else "تفاعل / ركوب"
+    action_button.visible = not driving
+    (vehicle_button.get_node("Caption") as Label).text = "نزول" if driving else "ركوب"
     var objective := "تسلّم الطلب عند العلامة"
     marker.position = PICKUP + Vector3.UP * 0.13
     if missions.active_mission == JOB:
@@ -452,32 +533,62 @@ func _refresh_ui(message := "") -> void:
     if navigation >= 0:
         hud.text += "\nالوجهة · " + CITY.DISTRICTS[navigation].name
     if not message.is_empty():
-        hud.text += "\n" + message
+        message_text.text = message
+        message_remaining = 3.5
 
 func _request_interaction() -> void:
     interact_requested = true
 
+func _request_vehicle() -> void:
+    vehicle_requested = true
+
+func _toggle_vehicle() -> void:
+    if not driving:
+        var separation := player.global_position - car.global_position
+        if Vector2(separation.x, separation.z).length() > BOARD_DISTANCE or absf(separation.y) > 1.5:
+            _refresh_ui("اقترب من سيارتك أولاً")
+            return
+        driving = true
+        car.enter_vehicle()
+        yaw = 0.0
+        player.velocity = Vector3.ZERO
+        jump_buffer = 0.0
+        player.hide()
+        player.collision_layer = 0
+        player.collision_mask = 0
+        _refresh_ui("السيارة جاهزة للقيادة")
+        return
+    if absf(car.forward_speed) > 1.5:
+        _refresh_ui("أوقف السيارة قبل النزول")
+        return
+    var probe := PhysicsShapeQueryParameters3D.new()
+    probe.shape = player.get_child(0).shape
+    probe.collision_mask = 3
+    for side in [1.0, -1.0]:
+        var exit_position: Vector3 = car.global_position + car.global_basis.x * 2.2 * side + Vector3.UP * 0.43
+        probe.transform = Transform3D(Basis.IDENTITY, exit_position)
+        if get_world_3d().direct_space_state.intersect_shape(probe, 1).is_empty():
+            _leave_vehicle(exit_position)
+            _refresh_ui()
+            return
+    _refresh_ui("حرّك السيارة لتترك مساحة للنزول")
+
+func _leave_vehicle(exit_position: Vector3) -> void:
+    yaw = wrapf(yaw + car.rotation.y, -PI, PI)
+    car.exit_vehicle()
+    driving = false
+    player.global_position = exit_position
+    player.velocity = Vector3.ZERO
+    player.show()
+    player.collision_layer = 1
+    player.collision_mask = 3
+    braking = false
+
 func _interact() -> void:
     if driving:
-        if absf(car.forward_speed) > 1.5:
-            _refresh_ui("أوقف السيارة قبل النزول")
-            return
-        var exit_position := car.global_position + car.global_basis.x * 2.2 + Vector3.UP * 0.4
-        var probe := PhysicsShapeQueryParameters3D.new()
-        probe.shape = player.get_child(0).shape
-        probe.collision_mask = 3
-        probe.transform = Transform3D(Basis.IDENTITY, exit_position)
-        if not get_world_3d().direct_space_state.intersect_shape(probe, 1).is_empty():
-            _refresh_ui("اترك مساحة بجانب السيارة")
-            return
-        car.exit_vehicle()
-        driving = false
-        player.global_position = exit_position
-        player.velocity = Vector3.ZERO
-        player.show()
-        player.collision_layer = 1
-        player.collision_mask = 3
-    elif player.position.distance_to(PICKUP) < 3.0 and not state.completed_missions.has(JOB):
+        _toggle_vehicle()
+        return
+    if player.position.distance_to(PICKUP) < 3.0 and not state.completed_missions.has(JOB):
         if missions.start_mission(JOB, 1, 150):
             _save()
     elif player.position.distance_to(DELIVERY) < 3.0 and missions.active_mission == JOB:
@@ -495,12 +606,9 @@ func _interact() -> void:
         state.set_outfit("market")
         _apply_outfit()
         _save()
-    elif player.position.distance_to(car.position) < 3.6:
-        driving = true
-        car.enter_vehicle()
-        player.hide()
-        player.collision_layer = 0
-        player.collision_mask = 0
+    else:
+        _toggle_vehicle()
+        return
     _refresh_ui()
 
 func _apply_outfit() -> void:
@@ -552,8 +660,38 @@ func _restore() -> void:
         missions.start_mission(JOB, 1, 150)
 
 func _jump() -> void:
-    if not driving and player.is_on_floor():
-        player.velocity.y = JUMP_SPEED
+    if not driving:
+        jump_buffer = 0.16
+
+func _on_car_impact(speed_lost: float) -> void:
+    if driving:
+        _apply_damage(roundi(speed_lost * 1.7))
+
+func _apply_damage(amount: int) -> void:
+    if damage_cooldown > 0.0 or respawn_pending:
+        return
+    state.damage(amount)
+    damage_cooldown = 0.55
+    respawn_pending = state.health == 0
+
+func _respawn() -> void:
+    respawn_pending = false
+    if driving:
+        _leave_vehicle(SPAWN)
+    player.position = SPAWN
+    player.velocity = Vector3.ZERO
+    state.reset_vitals()
+    state.set_wanted(0)
+    _refresh_ui("عدت إلى نقطة البداية")
+
+func _input(event: InputEvent) -> void:
+    if event is InputEventScreenTouch and not event.pressed:
+        if event.index == touch_id:
+            touch_id = -1
+            stick = Vector2.ZERO
+        if camera_fingers.has(event.index):
+            camera_fingers.erase(event.index)
+            camera_span = 0.0
 
 func _notification(what: int) -> void:
     if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
@@ -589,6 +727,8 @@ func _unhandled_input(event: InputEvent) -> void:
                 action_requested = "horn"
             KEY_E:
                 _request_interaction()
+            KEY_V:
+                _request_vehicle()
             KEY_SPACE:
                 _jump()
             KEY_F5:
@@ -602,12 +742,6 @@ func _unhandled_input(event: InputEvent) -> void:
             elif camera_fingers.size() < 2:
                 camera_fingers[event.index] = event.position
                 camera_span = _finger_span()
-        elif event.index == touch_id:
-            touch_id = -1
-            stick = Vector2.ZERO
-        elif camera_fingers.has(event.index):
-            camera_fingers.erase(event.index)
-            camera_span = 0.0
     elif event is InputEventScreenDrag:
         if event.index == touch_id:
             stick = (event.position - touch_start).limit_length(95) / 95.0
@@ -642,6 +776,16 @@ func _orbit(relative: Vector2) -> void:
     pitch = clampf(pitch - relative.y * 0.006, 0.14, 0.95)
 
 func _physics_process(delta: float) -> void:
+    damage_cooldown = maxf(0.0, damage_cooldown - delta)
+    if respawn_pending:
+        _respawn()
+    if message_remaining > 0.0:
+        message_remaining = maxf(0.0, message_remaining - delta)
+        if message_remaining == 0.0:
+            message_text.text = ""
+    if vehicle_requested:
+        vehicle_requested = false
+        _toggle_vehicle()
     if interact_requested:
         interact_requested = false
         _interact()
@@ -675,9 +819,16 @@ func _physics_process(delta: float) -> void:
         horizontal_velocity = horizontal_velocity.move_toward(desired_velocity, (23.0 if input_dir.length() > 0.08 else 34.0) * delta)
         player.velocity.x = horizontal_velocity.x
         player.velocity.z = horizontal_velocity.y
-        if not player.is_on_floor():
+        if player.is_on_floor() and jump_buffer > 0.0:
+            player.velocity.y = JUMP_SPEED
+            jump_buffer = 0.0
+        elif not player.is_on_floor():
             player.velocity.y -= GRAVITY * delta
+        jump_buffer = maxf(0.0, jump_buffer - delta)
+        var downward_speed := -player.velocity.y
         player.move_and_slide()
+        if player.is_on_floor() and downward_speed > 12.0:
+            _apply_damage(roundi((downward_speed - 10.0) * 2.7))
         var pace := Vector2(player.get_real_velocity().x, player.get_real_velocity().z).length()
         var aiming := last_action == "pulse" and action_cooldown > 0.0
         var strike := action_cooldown / 0.34 if last_action == "strike" else 0.0
@@ -711,12 +862,13 @@ func _physics_process(delta: float) -> void:
     var heading := yaw + (car.rotation.y if driving else 0.0)
     var offset := Vector3(0, sin(pitch), cos(pitch)).rotated(Vector3.UP, heading)
     current_zoom = lerpf(current_zoom, zoom_scale, 1.0 - exp(-delta * 11.0))
-    var target := focus + offset * (10.0 if driving else 7.0) * current_zoom
+    var wanted_reach := (10.0 if driving else 7.0) * current_zoom
+    var target := focus + offset * wanted_reach
     var query := PhysicsRayQueryParameters3D.create(focus, target, 1, [player.get_rid(), car.get_rid()])
     var hit := get_world_3d().direct_space_state.intersect_ray(query)
-    if not hit.is_empty():
-        target = hit.position - offset * 0.18
-    camera.position = target if not hit.is_empty() else camera.position.lerp(target, 1.0 - exp(-delta * 12.0))
+    var safe_reach := wanted_reach if hit.is_empty() else maxf(0.22, focus.distance_to(hit.position) - 0.24)
+    camera_reach = minf(safe_reach, lerpf(camera_reach, safe_reach, 1.0 - exp(-delta * 12.0)))
+    camera.position = focus + offset * camera_reach
     camera.look_at(focus)
 
 func _update_actions(delta: float) -> void:

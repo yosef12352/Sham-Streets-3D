@@ -35,10 +35,10 @@ func _run() -> void:
     first._jump()
     await frames(12)
     check(first.player.position.y > 1.3, "Jump should leave the ground")
-    first.player.position = Vector3(-0.6, 1.0, 8.0)
-    first._request_interaction()
+    first.player.position = first.SPAWN
+    first._request_vehicle()
     await frames(2)
-    check(first.driving and first.car.driver_active, "Player should enter the nearby car")
+    check(first.driving and first.car.driver_active, "Player should enter the car directly from the spawn point")
     var start_z: float = first.car.position.z
     Input.action_press("ui_up")
     await frames(35)
@@ -48,9 +48,16 @@ func _run() -> void:
     await frames(45)
     first.braking = false
     check(absf(first.car.forward_speed) < 0.1, "Brake should stop the car")
-    first._request_interaction()
+    first._request_vehicle()
     await frames(2)
     check(not first.driving and first.player.visible, "Player should exit the stopped car")
+    var walked_from: Vector3 = first.player.position
+    Input.action_press("ui_up")
+    await frames(12)
+    Input.action_release("ui_up")
+    await frames(14)
+    check(first.player.position.distance_to(walked_from) > 0.4, "Walking should move the player")
+    check(Vector2(first.player.velocity.x, first.player.velocity.z).length() < 0.1, "Movement should stop after release")
     first.player.position = first.PICKUP + Vector3.UP
     first._request_interaction()
     await frames(2)
@@ -125,6 +132,14 @@ func _run() -> void:
     check(third.navigation == 2 and third.minimap.navigation == 2 and not third.map_layer.visible, "Selecting Hanano should show the route in the HUD")
     check(third.current_district == 3, "West side should be identified as Maysaloun")
     check(third.road_response.local_traffic.size() == 3, "Satellite roads should have AI traffic")
+    third._apply_damage(65)
+    check(third.state.armor == 0 and third.state.health == 85, "Armor should absorb damage before health")
+    check(third.health_bar.value == 85 and third.armor_bar.value == 0, "HUD should display damage")
+    check(third._save() and ShamSaveSystem.load_game().get("health") == 85, "Health and armor should be saved")
+    third.damage_cooldown = 0.0
+    third._apply_damage(200)
+    await frames(2)
+    check(third.state.health == 100 and third.player.position.distance_to(third.SPAWN) < 0.5, "Zero health should respawn the player")
     var corrupted := FileAccess.open(ShamSaveSystem.SAVE_PATH, FileAccess.WRITE)
     corrupted.store_string("{truncated")
     corrupted.close()
