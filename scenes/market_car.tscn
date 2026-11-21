@@ -1,0 +1,75 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/vehicle_controller.gd" id="1"]
+
+[ext_resource type="Script" path="res://scripts/car_trim.gd" id="2"]
+
+[sub_resource type="BoxShape3D" id="Shape"]
+size = Vector3(1.9, 1.3, 4)
+
+[sub_resource type="StandardMaterial3D" id="Paint"]
+albedo_color = Color(0.17, 0.52, 0.57, 1)
+metallic = 0.35
+roughness = 0.35
+cull_mode = 2
+
+[sub_resource type="BoxMesh" id="Body"]
+material = SubResource("Paint")
+size = Vector3(1.85, 0.65, 4)
+
+[sub_resource type="StandardMaterial3D" id="Glass"]
+albedo_color = Color(0.15, 0.22, 0.25, 1)
+roughness = 0.22
+cull_mode = 2
+
+[sub_resource type="BoxMesh" id="Cab"]
+material = SubResource("Glass")
+size = Vector3(1.54, 0.66, 2.05)
+
+[sub_resource type="StandardMaterial3D" id="Rubber"]
+albedo_color = Color(0.07, 0.07, 0.08, 1)
+
+[sub_resource type="CylinderMesh" id="Wheel"]
+material = SubResource("Rubber")
+top_radius = 0.34
+bottom_radius = 0.34
+height = 0.24
+radial_segments = 12
+
+[node name="MarketCar" type="CharacterBody3D"]
+script = ExtResource("1")
+maximum_speed = 17.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("Shape")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.03, 0)
+mesh = SubResource("Body")
+
+[node name="Cab" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.59, 0.25)
+mesh = SubResource("Cab")
+
+[node name="WheelFL" type="MeshInstance3D" parent="."]
+position = Vector3(-0.91, -0.29, -1.23)
+rotation = Vector3(0, 0, 1.5707963)
+mesh = SubResource("Wheel")
+
+[node name="WheelFR" type="MeshInstance3D" parent="."]
+position = Vector3(0.91, -0.29, -1.23)
+rotation = Vector3(0, 0, 1.5707963)
+mesh = SubResource("Wheel")
+
+[node name="WheelRL" type="MeshInstance3D" parent="."]
+position = Vector3(-0.91, -0.29, 1.23)
+rotation = Vector3(0, 0, 1.5707963)
+mesh = SubResource("Wheel")
+
+[node name="WheelRR" type="MeshInstance3D" parent="."]
+position = Vector3(0.91, -0.29, 1.23)
+rotation = Vector3(0, 0, 1.5707963)
+mesh = SubResource("Wheel")
+
+[node name="Trim" type="Node3D" parent="."]
+script = ExtResource("2")

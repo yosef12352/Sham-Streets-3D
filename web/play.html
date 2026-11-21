@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>شوارع الشام 3D</title>
+<style>
+* {box-sizing:border-box}
+html,body {margin:0;height:100%;background:#162524;color:#fff8ed;font:16px system-ui,sans-serif}
+body {overflow:hidden}
+canvas {display:block; width:100%; height:100%; touch-action:none; outline:none}
+[hidden] {display:none!important}
+main {position:fixed;inset:0;display:grid;place-items:center;padding:20px;overflow:auto;background:radial-gradient(ellipse at 85% 0%,#395752,transparent 62%),linear-gradient(145deg,#1d302d,#111c1c)}
+section {width:min(100%,450px);padding:clamp(24px,6vw,45px);border:1px solid #b79b6d60;border-radius:24px;background:#182625;box-shadow:0 24px 60px #0006}
+p {line-height:1.65;color:#d8ccbd;margin:0 0 18px}
+h1 {font-size:clamp(32px,8vw,54px);line-height:1.12;margin:8px 0 18px}
+small {color:#f1bc72;font-weight:700}
+button {width:100%;min-height:54px;border:0;border-radius:13px;background:#f1bc72;color:#192420;font:700 20px system-ui;cursor:pointer}
+button:focus-visible {outline:3px solid white;outline-offset:4px}
+progress {width:100%;accent-color:#f1bc72;margin-top:16px}
+#message {margin:12px 0 0;font-size:14px}
+#rotate {position:fixed;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:7px 12px;border-radius:20px;background:#162524f2;pointer-events:none;display:none;font-size:13px}
+@media (orientation:portrait) and (pointer:coarse) {#rotate:not([hidden]) {display:block}}
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="0" aria-label="لعبة شوارع الشام"><p>متصفحك لا يدعم لوحة اللعبة.</p></canvas>
+<main id="cover">
+<section aria-labelledby="title">
+<small>معاينة سوق حلب</small>
+<h1 id="title">شوارع الشام <bdi>3D</bdi></h1>
+<p>استكشف السوق، قد السيارة، ووصّل أول طلب.</p>
+<button type="button" id="play">العب الآن</button>
+<progress id="progress" aria-label="تحميل اللعبة" hidden></progress>
+<p id="message" role="status">على الموبايل، اقلب الشاشة بالعرض. اسحب يساراً للحركة ويميناً لتدوير الكاميرا.</p>
+</section>
+</main>
+<aside id="rotate" hidden>اقلب هاتفك بالعرض لتحكم أسهل</aside>
+<script src="$GODOT_URL"></script>
+<script>
+// Serve the compressed engine on static hosts with individual asset size limits.
+const fetchAsset = window.fetch.bind(window);
+window.fetch = async (resource, options) => {
+  if (typeof resource !== 'string' || !resource.endsWith('.wasm')) {
+    return fetchAsset(resource, options);
+  }
+  const packed = await fetchAsset(resource + '.gz', options);
+  if (!packed.ok) throw new Error('تعذّر تنزيل محرك اللعبة.');
+  const length = packed.headers.get('X-Uncompressed-Length');
+  const headers = {'Content-Type': 'application/wasm'};
+  if (length) headers['Content-Length'] = length;
+  return new Response(packed.body.pipeThrough(new DecompressionStream('gzip')), {headers});
+};
+const play = document.querySelector('#play');
+const progress = document.querySelector('#progress');
+const message = document.querySelector('#message');
+play.addEventListener('click', async () => {
+  play.disabled = true;
+  play.hidden = true;
+  progress.hidden = false;
+  message.textContent = 'عم تتحمّل اللعبة…';
+  try {
+    if (typeof Engine === 'undefined' || Engine.getMissingFeatures({threads:false}).length) {
+      throw new Error('يلزم متصفح حديث يدعم WebGL 2 لتشغيل اللعبة.');
+    }
+    await new Engine($GODOT_CONFIG).startGame({onProgress(current,total) {
+      if (total > 0) {progress.max = total;progress.value = current;}
+    }});
+    document.querySelector('#cover').hidden = true;
+    document.querySelector('#rotate').hidden = false;
+    document.querySelector('#canvas').focus({preventScroll:true});
+  } catch (error) {
+    console.error(error);
+    message.textContent = 'تعذّر تشغيل اللعبة. جرّب تحديث المتصفح وإعادة فتح الصفحة.';
+    progress.hidden = true;
+    play.hidden = false;
+    play.textContent = 'إعادة المحاولة';
+    play.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
